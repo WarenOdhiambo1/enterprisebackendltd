@@ -7,7 +7,9 @@ const router = express.Router();
 // Get all branches (public for home page)
 router.get('/public', async (req, res) => {
   try {
+    console.log('Fetching public branches from Airtable');
     const branches = await airtableHelpers.find(TABLES.BRANCHES);
+    console.log('Branches found:', branches.length);
     
     // Return only public information
     const publicBranches = branches.map(branch => ({
@@ -22,8 +24,16 @@ router.get('/public', async (req, res) => {
 
     res.json(publicBranches);
   } catch (error) {
-    console.error('Get public branches error:', error);
-    res.status(500).json({ message: 'Failed to fetch branches' });
+    console.error('Get public branches error details:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name
+    });
+    res.status(500).json({ 
+      message: 'Failed to fetch branches',
+      error: error.message,
+      details: 'Airtable connection issue'
+    });
   }
 });
 

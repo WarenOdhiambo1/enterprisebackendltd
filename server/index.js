@@ -134,6 +134,24 @@ app.get('/', (req, res) => {
   }
 });
 
+// Simple test route
+app.get('/api/test', (req, res) => {
+  res.json({ 
+    message: 'API is working',
+    timestamp: new Date().toISOString(),
+    status: 'success'
+  });
+});
+
+// Auth test route
+app.post('/api/auth/test', (req, res) => {
+  res.json({ 
+    message: 'Auth route is working',
+    timestamp: new Date().toISOString(),
+    body: req.body
+  });
+});
+
 // Favicon route
 app.get('/favicon.ico', (req, res) => {
   res.status(204).end();

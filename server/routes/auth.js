@@ -109,17 +109,21 @@ router.post('/register', async (req, res) => {
 // Login endpoint
 router.post('/login', async (req, res) => {
   try {
+    console.log('Login attempt started');
     const { email, password } = req.body;
     
     if (!email || !password) {
       return res.status(400).json({ message: 'Email and password are required' });
     }
 
+    console.log('Attempting to find users in Airtable');
     const { mfaToken } = req.body;
 
     // Find user by email
     const allUsers = await airtableHelpers.find(TABLES.EMPLOYEES);
+    console.log('Users found:', allUsers.length);
     const user = allUsers.find(u => u.email === email);
+    console.log('User found for email:', !!user);
 
     if (!user) {
       return res.status(401).json({ message: 'Invalid credentials' });
@@ -211,8 +215,16 @@ router.post('/login', async (req, res) => {
     res.json(finalResponse);
 
   } catch (error) {
-    console.error('Login error:', error);
-    res.status(500).json({ message: 'Login failed' });
+    console.error('Login error details:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name
+    });
+    res.status(500).json({ 
+      message: 'Login failed',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error',
+      details: error.message
+    });
   }
 });
 
