@@ -108,10 +108,10 @@ app.use(cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Health check route
-app.get('/', (req, res) => {
+// Health check route with Airtable test
+app.get('/', async (req, res) => {
   try {
-    res.json({ 
+    const healthData = { 
       status: 'OK', 
       message: 'BSN Manager Backend API is running',
       timestamp: new Date().toISOString(),
@@ -123,7 +123,24 @@ app.get('/', (req, res) => {
         airtable_base: !!process.env.AIRTABLE_BASE_ID,
         encryption_key: !!process.env.ENCRYPTION_KEY
       }
-    });
+    };
+
+    // Test Airtable connection
+    try {
+      const { airtableHelpers, TABLES } = require('./config/airtable');
+      const employees = await airtableHelpers.find(TABLES.EMPLOYEES, {}, 1);
+      healthData.airtable_test = {
+        status: 'connected',
+        employees_found: employees.length
+      };
+    } catch (airtableError) {
+      healthData.airtable_test = {
+        status: 'error',
+        error: airtableError.message
+      };
+    }
+
+    res.json(healthData);
   } catch (error) {
     console.error('Health check error:', error);
     res.status(500).json({ 
