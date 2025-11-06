@@ -10,22 +10,27 @@ const router = express.Router();
 
 // Configure Google Drive API
 let auth;
-if (process.env.GOOGLE_CREDENTIALS_BASE64) {
-  // For Vercel deployment - decode base64 credentials
-  const credentials = JSON.parse(Buffer.from(process.env.GOOGLE_CREDENTIALS_BASE64, 'base64').toString());
-  auth = new google.auth.GoogleAuth({
-    credentials,
-    scopes: ['https://www.googleapis.com/auth/drive.file']
-  });
-} else {
-  // For local development - use file
-  auth = new google.auth.GoogleAuth({
-    keyFile: process.env.GOOGLE_SERVICE_ACCOUNT_KEY || './google-credentials.json',
-    scopes: ['https://www.googleapis.com/auth/drive.file']
-  });
+try {
+  if (process.env.GOOGLE_CREDENTIALS_BASE64) {
+    // For Vercel deployment - decode base64 credentials
+    const credentials = JSON.parse(Buffer.from(process.env.GOOGLE_CREDENTIALS_BASE64, 'base64').toString());
+    auth = new google.auth.GoogleAuth({
+      credentials,
+      scopes: ['https://www.googleapis.com/auth/drive.file']
+    });
+  } else {
+    // For local development - use file
+    auth = new google.auth.GoogleAuth({
+      keyFile: process.env.GOOGLE_SERVICE_ACCOUNT_KEY || './google-credentials.json',
+      scopes: ['https://www.googleapis.com/auth/drive.file']
+    });
+  }
+} catch (error) {
+  console.error('Google Drive configuration failed:', error.message);
+  auth = null;
 }
 
-const drive = google.drive({ version: 'v3', auth });
+const drive = auth ? google.drive({ version: 'v3', auth }) : null;
 
 // Configure multer for file uploads
 const upload = multer({
@@ -45,6 +50,10 @@ const upload = multer({
 // Upload document
 router.post('/upload', authenticateToken, upload.single('document'), async (req, res) => {
   try {
+    if (!drive) {
+      return res.status(503).json({ message: 'Document upload service not available' });
+    }
+    
     const { category, description, tags } = req.body;
     const file = req.file;
 
