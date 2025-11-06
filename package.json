@@ -1,0 +1,30 @@
+{
+  "name": "bsn-manager-backend",
+  "version": "1.0.0",
+  "description": "BSN Manager Backend API",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "nodemon server/index.js"
+  },
+  "dependencies": {
+    "airtable": "^0.12.2",
+    "aws-sdk": "^2.1692.0",
+    "bcryptjs": "^2.4.3",
+    "compression": "^1.7.4",
+    "cookie-parser": "^1.4.6",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "express-rate-limit": "^6.8.1",
+    "googleapis": "^164.1.0",
+    "helmet": "^7.0.0",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.0.2",
+    "qrcode": "^1.5.3",
+    "speakeasy": "^2.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}

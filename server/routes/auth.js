@@ -1,0 +1,346 @@
+const express = require('express');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const speakeasy = require('speakeasy');
+const QRCode = require('qrcode');
+const { body, validationResult } = require('express-validator');
+const { airtableHelpers, TABLES } = require('../config/airtable');
+const Encryption = require('../utils/encryption');
+
+// CSRF protection middleware (disabled in development)
+const csrfProtection = (req, res, next) => {
+  if (process.env.NODE_ENV === 'development') {
+    return next();
+  }
+  const token = req.headers['x-csrf-token'] || req.body._csrf;
+  if (!token) {
+    return res.status(403).json({ message: 'CSRF token required' });
+  }
+  next();
+};
+
+const router = express.Router();
+
+// Password validation rules
+const passwordValidation = [
+  body('password')
+    .isLength({ min: 12 })
+    .withMessage('Password must be at least 12 characters long')
+    .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/)
+    .withMessage('Password must contain uppercase, lowercase, number and special character')
+];
+
+// Register admin (first-time setup)
+router.post('/register', async (req, res) => {
+  try {
+    console.log('Register request received');
+    console.log('Request body:', JSON.stringify(req.body, null, 2));
+    console.log('Content-Type:', req.headers['content-type']);
+
+    const { full_name, email, password, role } = req.body;
+
+    // Validate required fields
+    if (!full_name || !email || !password) {
+      console.log('Missing required fields:', { full_name: !!full_name, email: !!email, password: !!password });
+      return res.status(400).json({ message: 'Full name, email, and password are required' });
+    }
+
+    // Ensure only admin role is allowed for registration
+    if (role && role !== 'admin') {
+      console.log('Invalid role provided:', role);
+      return res.status(400).json({ message: 'Only admin registration is allowed' });
+    }
+
+    console.log('Checking for existing admins...');
+    // Check if any admin already exists
+    const existingAdmins = await airtableHelpers.find(
+      TABLES.EMPLOYEES,
+      '{role} = "admin"'
+    );
+    console.log('Existing admins found:', existingAdmins.length);
+
+    if (existingAdmins.length > 0) {
+      return res.status(400).json({ message: 'Admin already exists. Use login instead.' });
+    }
+
+    console.log('Hashing password...');
+    const hashedPassword = await bcrypt.hash(password, 12);
+    
+    console.log('Creating admin record...');
+    const adminData = {
+      full_name,
+      email,
+      role: 'admin',
+      password_hash: hashedPassword,
+      is_active: true,
+      hire_date: new Date().toISOString().split('T')[0],
+      mfa_enabled: false
+    };
+    console.log('Admin data to create:', JSON.stringify(adminData, null, 2));
+    
+    const admin = await airtableHelpers.create(TABLES.EMPLOYEES, adminData);
+    console.log('Admin created successfully:', admin.id);
+
+    res.status(201).json({ message: 'Admin account created successfully' });
+  } catch (error) {
+    console.error('Register error details:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name
+    });
+    res.status(500).json({ 
+      message: 'Registration failed',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// Login endpoint
+router.post('/login', [
+  body('email').isEmail().normalizeEmail(),
+  body('password').notEmpty()
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { email, password, mfaToken } = req.body;
+
+    // Find user by email
+    const allUsers = await airtableHelpers.find(TABLES.EMPLOYEES);
+    const user = allUsers.find(u => u.email === email);
+
+    if (!user) {
+      return res.status(401).json({ message: 'Invalid credentials' });
+    }
+
+    // Check if user is active
+    if (!user.is_active) {
+      return res.status(401).json({ message: 'Account is deactivated' });
+    }
+
+    // Verify password
+    const isValidPassword = await bcrypt.compare(password, user.password_hash);
+    if (!isValidPassword) {
+      return res.status(401).json({ message: 'Invalid credentials' });
+    }
+
+    // Check MFA for privileged roles (disabled for development)
+    const privilegedRoles = []; // ['boss', 'manager', 'admin'] - disabled for testing
+    if (privilegedRoles.includes(user.role)) {
+      if (!user.mfa_secret) {
+        return res.status(200).json({ 
+          requiresMfaSetup: true,
+          userId: user.id 
+        });
+      }
+
+      if (!mfaToken) {
+        return res.status(200).json({ 
+          requiresMfa: true,
+          userId: user.id 
+        });
+      }
+
+      const verified = speakeasy.totp.verify({
+        secret: user.mfa_secret,
+        encoding: 'base32',
+        token: mfaToken,
+        window: 2
+      });
+
+      if (!verified) {
+        return res.status(401).json({ message: 'Invalid MFA token' });
+      }
+    }
+
+    // Generate JWT tokens
+    const accessToken = jwt.sign(
+      { 
+        userId: user.id,
+        email: user.email,
+        role: user.role,
+        branchId: user.branch_id
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: process.env.JWT_EXPIRE || '1h' }
+    );
+
+    const refreshToken = jwt.sign(
+      { userId: user.id },
+      process.env.JWT_REFRESH_SECRET,
+      { expiresIn: process.env.JWT_REFRESH_EXPIRE || '7d' }
+    );
+
+    // Update last login
+    await airtableHelpers.update(TABLES.EMPLOYEES, user.id, {
+      last_login: new Date().toISOString()
+    });
+
+    res.json({
+      accessToken,
+      refreshToken,
+      user: {
+        id: user.id,
+        email: user.email,
+        fullName: user.full_name,
+        role: user.role,
+        branchId: user.branch_id
+      }
+    });
+
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ message: 'Login failed' });
+  }
+});
+
+// Setup MFA
+router.post('/setup-mfa', csrfProtection, async (req, res) => {
+  try {
+    const { userId } = req.body;
+
+    const user = await airtableHelpers.findById(TABLES.EMPLOYEES, userId);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const secret = speakeasy.generateSecret({
+      name: `BSN Manager (${user.email})`,
+      issuer: 'BSN Manager'
+    });
+
+    // Generate QR code
+    const qrCodeUrl = await QRCode.toDataURL(secret.otpauth_url);
+
+    // Store secret temporarily (will be confirmed on verification)
+    await airtableHelpers.update(TABLES.EMPLOYEES, userId, {
+      mfa_secret_temp: secret.base32
+    });
+
+    res.json({
+      secret: secret.base32,
+      qrCode: qrCodeUrl
+    });
+
+  } catch (error) {
+    console.error('MFA setup error:', error);
+    res.status(500).json({ message: 'MFA setup failed' });
+  }
+});
+
+// Verify MFA setup
+router.post('/verify-mfa', csrfProtection, async (req, res) => {
+  try {
+    const { userId, token } = req.body;
+
+    const user = await airtableHelpers.findById(TABLES.EMPLOYEES, userId);
+    if (!user || !user.mfa_secret_temp) {
+      return res.status(400).json({ message: 'MFA setup not initiated' });
+    }
+
+    const verified = speakeasy.totp.verify({
+      secret: user.mfa_secret_temp,
+      encoding: 'base32',
+      token: token,
+      window: 2
+    });
+
+    if (!verified) {
+      return res.status(400).json({ message: 'Invalid token' });
+    }
+
+    // Confirm MFA setup
+    await airtableHelpers.update(TABLES.EMPLOYEES, userId, {
+      mfa_secret: user.mfa_secret_temp,
+      mfa_secret_temp: null,
+      mfa_enabled: true
+    });
+
+    res.json({ message: 'MFA setup completed successfully' });
+
+  } catch (error) {
+    console.error('MFA verification error:', error);
+    res.status(500).json({ message: 'MFA verification failed' });
+  }
+});
+
+// Refresh token
+router.post('/refresh', async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+
+    if (!refreshToken) {
+      return res.status(401).json({ message: 'Refresh token required' });
+    }
+
+    const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
+    const user = await airtableHelpers.findById(TABLES.EMPLOYEES, decoded.userId);
+
+    if (!user || !user.is_active) {
+      return res.status(401).json({ message: 'Invalid refresh token' });
+    }
+
+    const newAccessToken = jwt.sign(
+      { 
+        userId: user.id,
+        email: user.email,
+        role: user.role,
+        branchId: user.branch_id
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: process.env.JWT_EXPIRE || '1h' }
+    );
+
+    res.json({ accessToken: newAccessToken });
+
+  } catch (error) {
+    res.status(401).json({ message: 'Invalid refresh token' });
+  }
+});
+
+// Change password
+router.post('/change-password', csrfProtection, passwordValidation, async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { userId, currentPassword, newPassword } = req.body;
+
+    const user = await airtableHelpers.findById(TABLES.EMPLOYEES, userId);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const isValidPassword = await bcrypt.compare(currentPassword, user.password_hash);
+    if (!isValidPassword) {
+      return res.status(400).json({ message: 'Current password is incorrect' });
+    }
+
+    const saltRounds = 12;
+    const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
+
+    await airtableHelpers.update(TABLES.EMPLOYEES, userId, {
+      password_hash: hashedPassword,
+      password_changed_at: new Date().toISOString()
+    });
+
+    res.json({ message: 'Password changed successfully' });
+
+  } catch (error) {
+    console.error('Password change error:', error);
+    res.status(500).json({ message: 'Password change failed' });
+  }
+});
+
+// Logout
+router.post('/logout', (req, res) => {
+  // In a production environment, you might want to blacklist the token
+  res.json({ message: 'Logged out successfully' });
+});
+
+module.exports = router;

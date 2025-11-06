@@ -1,0 +1,143 @@
+const jwt = require('jsonwebtoken');
+const { airtableHelpers, TABLES } = require('../config/airtable');
+
+// JWT Authentication middleware
+const authenticateToken = async (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({ message: 'Access token required' });
+  }
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    
+    // Check if user still exists and is active
+    const user = await airtableHelpers.findById(TABLES.EMPLOYEES, decoded.userId);
+    
+    if (!user || !user.is_active) {
+      return res.status(401).json({ message: 'User not found or inactive' });
+    }
+
+    req.user = {
+      id: decoded.userId,
+      email: user.email,
+      role: user.role,
+      branchId: user.branch_id,
+      fullName: user.full_name
+    };
+
+    next();
+  } catch (error) {
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({ message: 'Token expired' });
+    }
+    return res.status(403).json({ message: 'Invalid token' });
+  }
+};
+
+// Role-based authorization middleware
+const authorizeRoles = (allowedRoles) => {
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+
+    // Admin always has access
+    if (req.user.role === 'admin' || allowedRoles.includes(req.user.role)) {
+      return next();
+    }
+
+    return res.status(403).json({ 
+      message: 'Insufficient permissions',
+      required: allowedRoles,
+      current: req.user.role
+    });
+
+    next();
+  };
+};
+
+// Branch access control middleware
+const authorizeBranch = (req, res, next) => {
+  const requestedBranchId = req.params.branchId || req.body.branchId || req.query.branchId;
+  
+  // Boss, Manager, and Admin can access all branches
+  if (['boss', 'manager', 'admin'].includes(req.user.role)) {
+    return next();
+  }
+
+  // HR can access all branches for employee management
+  if (req.user.role === 'hr') {
+    return next();
+  }
+
+  // Other roles can only access their assigned branch
+  if (req.user.branchId && requestedBranchId && req.user.branchId !== requestedBranchId) {
+    return res.status(403).json({ 
+      message: 'Access denied to this branch',
+      userBranch: req.user.branchId,
+      requestedBranch: requestedBranchId
+    });
+  }
+
+  next();
+};
+
+// Session timeout middleware
+const checkSessionTimeout = (req, res, next) => {
+  const sessionTimeout = parseInt(process.env.SESSION_TIMEOUT_MINUTES) || 30;
+  const now = Date.now();
+  const tokenIssuedAt = req.user.iat * 1000; // Convert to milliseconds
+  const timeoutMs = sessionTimeout * 60 * 1000;
+
+  if (now - tokenIssuedAt > timeoutMs) {
+    return res.status(401).json({ 
+      message: 'Session expired due to inactivity',
+      timeout: sessionTimeout
+    });
+  }
+
+  next();
+};
+
+// Audit logging middleware
+const auditLog = (action) => {
+  return async (req, res, next) => {
+    const originalSend = res.send;
+    
+    res.send = function(data) {
+      // Log the action after response is sent
+      setImmediate(async () => {
+        try {
+          await airtableHelpers.create('Audit_Logs', {
+            user_id: req.user?.id,
+            action: action,
+            resource: req.originalUrl,
+            method: req.method,
+            ip_address: req.ip,
+            user_agent: req.get('User-Agent'),
+            timestamp: new Date().toISOString(),
+            success: res.statusCode < 400,
+            status_code: res.statusCode
+          });
+        } catch (error) {
+          console.error('Audit log error:', error);
+        }
+      });
+      
+      originalSend.call(this, data);
+    };
+
+    next();
+  };
+};
+
+module.exports = {
+  authenticateToken,
+  authorizeRoles,
+  authorizeBranch,
+  checkSessionTimeout,
+  auditLog
+};
