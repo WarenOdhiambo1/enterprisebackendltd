@@ -152,6 +152,39 @@ app.post('/api/auth/test', (req, res) => {
   });
 });
 
+// Airtable diagnostic route
+app.get('/api/airtable-test', async (req, res) => {
+  try {
+    const { airtableHelpers, TABLES } = require('./server/config/airtable');
+    
+    // Test Employees table
+    const employees = await airtableHelpers.find(TABLES.EMPLOYEES);
+    
+    // Test Branches table
+    const branches = await airtableHelpers.find(TABLES.BRANCHES);
+    
+    res.json({
+      status: 'success',
+      employees_count: employees.length,
+      branches_count: branches.length,
+      sample_employee: employees.length > 0 ? {
+        id: employees[0].id,
+        email: employees[0].email,
+        role: employees[0].role,
+        has_password: !!employees[0].password_hash
+      } : null,
+      tables_tested: ['Employees', 'Branches']
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'error',
+      message: error.message,
+      error_type: error.name,
+      details: 'Airtable connection failed'
+    });
+  }
+});
+
 // Favicon route
 app.get('/favicon.ico', (req, res) => {
   res.status(204).end();
