@@ -36,8 +36,9 @@ const requiredEnvVars = [
 
 const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
 if (missingVars.length > 0) {
-  console.warn('⚠️  Missing environment variables:', missingVars);
-  console.warn('⚠️  Some features may not work properly');
+  console.error('❌ Missing required environment variables:', missingVars);
+  console.error('❌ Server cannot start without these variables');
+  process.exit(1);
 }
 
 // Security middleware
