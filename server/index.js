@@ -127,16 +127,19 @@ app.get('/', async (req, res) => {
 
     // Test Airtable connection
     try {
-      const { airtableHelpers, TABLES } = require('./config/airtable');
-      const employees = await airtableHelpers.find(TABLES.EMPLOYEES, {}, 1);
+      const { base, TABLES } = require('./config/airtable');
+      // Simple connection test - just check if we can access the base
+      const testResult = await base(TABLES.EMPLOYEES).select({ maxRecords: 1 }).firstPage();
       healthData.airtable_test = {
         status: 'connected',
-        employees_found: employees.length
+        employees_found: testResult.length,
+        tables_available: Object.keys(TABLES)
       };
     } catch (airtableError) {
       healthData.airtable_test = {
         status: 'error',
-        error: airtableError.message
+        error: airtableError.message,
+        error_type: airtableError.name || 'Unknown'
       };
     }
 

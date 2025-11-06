@@ -40,11 +40,16 @@ const airtableHelpers = {
   },
 
   // Find records with filter
-  async find(tableName, filterFormula = '', sort = []) {
+  async find(tableName, filterFormula, sort) {
     try {
       const selectOptions = {};
-      if (filterFormula) selectOptions.filterByFormula = filterFormula;
-      if (sort.length > 0) selectOptions.sort = sort;
+      
+      if (filterFormula && typeof filterFormula === 'string' && filterFormula.trim()) {
+        selectOptions.filterByFormula = filterFormula;
+      }
+      if (sort && Array.isArray(sort) && sort.length > 0) {
+        selectOptions.sort = sort;
+      }
       
       const records = await base(tableName).select(selectOptions).all();
       return records.map(record => ({
