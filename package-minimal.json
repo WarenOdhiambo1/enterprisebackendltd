@@ -1,7 +1,7 @@
 {
-  "name": "bsn-manager-backend",
+  "name": "bsn-manager-backend-minimal",
   "version": "1.0.0",
-  "description": "BSN Manager Backend API",
+  "description": "BSN Manager Backend API - Minimal Version",
   "main": "server/index-minimal.js",
   "scripts": {
     "start": "node server/index-minimal.js",
