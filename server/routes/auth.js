@@ -187,14 +187,19 @@ router.post('/login', async (req, res) => {
       branchId: user.branch_id
     };
     
+    console.log('User found:', user);
     console.log('Sending user response:', userResponse);
     
-    res.json({
+    const finalResponse = {
       success: true,
       accessToken,
       refreshToken,
       user: userResponse
-    });
+    };
+    
+    console.log('Final response being sent:', JSON.stringify(finalResponse, null, 2));
+    
+    res.json(finalResponse);
 
   } catch (error) {
     console.error('Login error:', error);
