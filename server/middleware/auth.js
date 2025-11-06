@@ -54,8 +54,6 @@ const authorizeRoles = (allowedRoles) => {
       required: allowedRoles,
       current: req.user.role
     });
-
-    next();
   };
 };
 

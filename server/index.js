@@ -108,22 +108,42 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Health check route
 app.get('/', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    message: 'BSN Manager Backend API is running',
-    timestamp: new Date().toISOString(),
-    env_check: {
-      jwt_secret: !!process.env.JWT_SECRET,
-      airtable_key: !!process.env.AIRTABLE_API_KEY,
-      airtable_base: !!process.env.AIRTABLE_BASE_ID,
-      encryption_key: !!process.env.ENCRYPTION_KEY
-    }
-  });
+  try {
+    res.json({ 
+      status: 'OK', 
+      message: 'BSN Manager Backend API is running',
+      timestamp: new Date().toISOString(),
+      version: '1.0.0',
+      env: process.env.NODE_ENV || 'development',
+      env_check: {
+        jwt_secret: !!process.env.JWT_SECRET,
+        airtable_key: !!process.env.AIRTABLE_API_KEY,
+        airtable_base: !!process.env.AIRTABLE_BASE_ID,
+        encryption_key: !!process.env.ENCRYPTION_KEY
+      }
+    });
+  } catch (error) {
+    console.error('Health check error:', error);
+    res.status(500).json({ 
+      status: 'ERROR',
+      message: 'Health check failed',
+      error: error.message
+    });
+  }
 });
 
 // Favicon route
 app.get('/favicon.ico', (req, res) => {
   res.status(204).end();
+});
+
+// Test route
+app.get('/api/test', (req, res) => {
+  res.json({ 
+    message: 'API is working',
+    timestamp: new Date().toISOString(),
+    status: 'success'
+  });
 });
 
 // Routes
@@ -156,7 +176,37 @@ app.use('*', (req, res) => {
   res.status(404).json({ message: 'Route not found' });
 });
 
+// Startup validation
+const validateStartup = () => {
+  try {
+    // Test JWT secret
+    if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
+      throw new Error('JWT_SECRET must be at least 32 characters');
+    }
+    
+    // Test encryption key
+    if (!process.env.ENCRYPTION_KEY || process.env.ENCRYPTION_KEY.length < 32) {
+      throw new Error('ENCRYPTION_KEY must be at least 32 characters');
+    }
+    
+    console.log('✅ Startup validation passed');
+    return true;
+  } catch (error) {
+    console.error('❌ Startup validation failed:', error.message);
+    return false;
+  }
+};
+
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+
+// Validate before starting
+if (validateStartup()) {
+  app.listen(PORT, () => {
+    console.log(`🚀 BSN Manager Backend running on port ${PORT}`);
+    console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`🔗 Health check: http://localhost:${PORT}/`);
+  });
+} else {
+  console.error('❌ Server startup aborted due to validation errors');
+  process.exit(1);
+}

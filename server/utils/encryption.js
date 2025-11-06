@@ -11,34 +11,43 @@ class Encryption {
   static encrypt(text) {
     if (!text) return null;
     
-    const iv = crypto.randomBytes(16);
-    const cipher = crypto.createCipher(ALGORITHM, KEY);
-    cipher.setAAD(Buffer.from('additional-data'));
-    
-    let encrypted = cipher.update(text, 'utf8', 'hex');
-    encrypted += cipher.final('hex');
-    
-    const authTag = cipher.getAuthTag();
-    
-    return {
-      encrypted,
-      iv: iv.toString('hex'),
-      authTag: authTag.toString('hex')
-    };
+    try {
+      const iv = crypto.randomBytes(16);
+      const cipher = crypto.createCipherGCM(ALGORITHM, KEY, iv);
+      cipher.setAAD(Buffer.from('additional-data'));
+      
+      let encrypted = cipher.update(text, 'utf8', 'hex');
+      encrypted += cipher.final('hex');
+      
+      const authTag = cipher.getAuthTag();
+      
+      return {
+        encrypted,
+        iv: iv.toString('hex'),
+        authTag: authTag.toString('hex')
+      };
+    } catch (error) {
+      console.error('Encryption error:', error);
+      return null;
+    }
   }
 
   static decrypt(encryptedData) {
     if (!encryptedData || typeof encryptedData !== 'object') return null;
     if (!encryptedData.encrypted || typeof encryptedData.encrypted !== 'string') return null;
     if (!encryptedData.authTag || typeof encryptedData.authTag !== 'string') return null;
+    if (!encryptedData.iv || typeof encryptedData.iv !== 'string') return null;
     
     try {
       // Validate hex format to prevent injection
-      if (!/^[0-9a-fA-F]+$/.test(encryptedData.encrypted) || !/^[0-9a-fA-F]+$/.test(encryptedData.authTag)) {
+      if (!/^[0-9a-fA-F]+$/.test(encryptedData.encrypted) || 
+          !/^[0-9a-fA-F]+$/.test(encryptedData.authTag) ||
+          !/^[0-9a-fA-F]+$/.test(encryptedData.iv)) {
         return null;
       }
       
-      const decipher = crypto.createDecipher(ALGORITHM, KEY);
+      const iv = Buffer.from(encryptedData.iv, 'hex');
+      const decipher = crypto.createDecipherGCM(ALGORITHM, KEY, iv);
       decipher.setAAD(Buffer.from('additional-data'));
       decipher.setAuthTag(Buffer.from(encryptedData.authTag, 'hex'));
       
