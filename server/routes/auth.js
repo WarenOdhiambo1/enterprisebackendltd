@@ -180,6 +180,7 @@ router.post('/login', async (req, res) => {
     });
 
     res.json({
+      success: true,
       accessToken,
       refreshToken,
       user: {
