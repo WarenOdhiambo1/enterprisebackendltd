@@ -304,13 +304,12 @@ router.post('/refresh', async (req, res) => {
 // Change password
 router.post('/change-password', csrfProtection, async (req, res) => {
   try {
-    const { newPassword } = req.body;
+    const { userId, currentPassword, newPassword } = req.body;
+    
     const passwordError = validatePassword(newPassword);
     if (passwordError) {
       return res.status(400).json({ message: passwordError });
     }
-
-    const { userId, currentPassword, newPassword } = req.body;
 
     const user = await airtableHelpers.findById(TABLES.EMPLOYEES, userId);
     if (!user) {
