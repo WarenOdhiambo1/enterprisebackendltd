@@ -35,29 +35,39 @@ router.get('/products', authenticateToken, authorizeRoles(['boss', 'manager', 'a
   }
 });
 
-// Create new product (add to all branches)
+// Create new product (add to specific branch or all branches)
 router.post('/products', authenticateToken, authorizeRoles(['boss', 'manager', 'admin']), async (req, res) => {
   try {
-    const { product_name, unit_price, reorder_level } = req.body;
+    const { product_name, unit_price, reorder_level, branch_id, quantity_available } = req.body;
 
     if (!product_name || !unit_price) {
       return res.status(400).json({ message: 'Product name and unit price are required' });
     }
 
-    // Get all branches
-    const branches = await airtableHelpers.find(TABLES.BRANCHES);
+    let branches;
+    if (branch_id) {
+      // Create for specific branch
+      const branch = await airtableHelpers.findById(TABLES.BRANCHES, branch_id);
+      if (!branch) {
+        return res.status(404).json({ message: 'Branch not found' });
+      }
+      branches = [branch];
+    } else {
+      // Create for all branches
+      branches = await airtableHelpers.find(TABLES.BRANCHES);
+    }
     
-    // Create stock entries for each branch
+    // Create stock entries
     const stockEntries = await Promise.all(
       branches.map(branch => 
         airtableHelpers.create(TABLES.STOCK, {
+          product_id: `PRD_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
           product_name,
           unit_price: parseFloat(unit_price),
-          quantity_available: 0,
+          quantity_available: parseInt(quantity_available) || 0,
           reorder_level: parseInt(reorder_level) || 10,
           branch_id: [branch.id],
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
+          last_updated: new Date().toISOString()
         })
       )
     );
@@ -65,11 +75,12 @@ router.post('/products', authenticateToken, authorizeRoles(['boss', 'manager', '
     res.status(201).json({
       message: 'Product created successfully',
       product_name,
-      branches_added: stockEntries.length
+      branches_added: stockEntries.length,
+      stock_entries: stockEntries
     });
   } catch (error) {
     console.error('Create product error:', error);
-    res.status(500).json({ message: 'Failed to create product' });
+    res.status(500).json({ message: 'Failed to create product', error: error.message });
   }
 });
 

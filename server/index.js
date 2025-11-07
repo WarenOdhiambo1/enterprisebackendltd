@@ -21,6 +21,7 @@ const receiptRoutes = require('./routes/receipts');
 const reportRoutes = require('./routes/reports');
 const documentRoutes = require('./routes/documents');
 const diagnosticsRoutes = require('./routes/diagnostics');
+const authCallbackRoutes = require('./routes/auth-callback');
 const { authenticateToken, authorizeRoles } = require('./middleware/auth');
 
 const app = express();
@@ -235,6 +236,7 @@ app.use('/api/receipts', receiptRoutes);
 app.use('/api/reports', reportRoutes);
 // app.use('/api/documents', documentRoutes); // Temporarily disabled due to Google credentials issue
 app.use('/api/diagnostics', diagnosticsRoutes);
+app.use('/auth', authCallbackRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
