@@ -88,6 +88,10 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ message: 'Email and password are required' });
     }
 
+    if (!process.env.AIRTABLE_API_KEY || !process.env.AIRTABLE_BASE_ID) {
+      return res.status(500).json({ message: 'Database not configured' });
+    }
+
     const allUsers = await airtableHelpers.find(TABLES.EMPLOYEES);
     const user = allUsers.find(u => u.email === email);
 

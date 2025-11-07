@@ -103,50 +103,19 @@ app.use(cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Health check route with Airtable test
-app.get('/', async (req, res) => {
-  try {
-    const healthData = { 
-      status: 'OK', 
-      message: 'BSN Manager Backend API is running',
-      timestamp: new Date().toISOString(),
-      version: '1.0.0',
-      env: process.env.NODE_ENV || 'development',
-      env_check: {
-        jwt_secret: !!process.env.JWT_SECRET,
-        airtable_key: !!process.env.AIRTABLE_API_KEY,
-        airtable_base: !!process.env.AIRTABLE_BASE_ID,
-        encryption_key: !!process.env.ENCRYPTION_KEY
-      }
-    };
-
-    // Test Airtable connection
-    try {
-      const { base, TABLES } = require('./config/airtable');
-      // Simple connection test - just check if we can access the base
-      const testResult = await base(TABLES.EMPLOYEES).select({ maxRecords: 1 }).firstPage();
-      healthData.airtable_test = {
-        status: 'connected',
-        employees_found: testResult.length,
-        tables_available: Object.keys(TABLES)
-      };
-    } catch (airtableError) {
-      healthData.airtable_test = {
-        status: 'error',
-        error: airtableError.message,
-        error_type: airtableError.name || 'Unknown'
-      };
+// Health check route
+app.get('/', (req, res) => {
+  res.json({ 
+    status: 'OK', 
+    message: 'BSN Manager Backend API is running',
+    timestamp: new Date().toISOString(),
+    env_check: {
+      jwt_secret: !!process.env.JWT_SECRET,
+      airtable_key: !!process.env.AIRTABLE_API_KEY,
+      airtable_base: !!process.env.AIRTABLE_BASE_ID,
+      encryption_key: !!process.env.ENCRYPTION_KEY
     }
-
-    res.json(healthData);
-  } catch (error) {
-    console.error('Health check error:', error);
-    res.status(500).json({ 
-      status: 'ERROR',
-      message: 'Health check failed',
-      error: error.message
-    });
-  }
+  });
 });
 
 // Simple test route

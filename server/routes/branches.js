@@ -7,12 +7,16 @@ const router = express.Router();
 // Get all branches (public for home page)
 router.get('/public', async (req, res) => {
   try {
+    if (!process.env.AIRTABLE_API_KEY || !process.env.AIRTABLE_BASE_ID) {
+      return res.status(500).json({ message: 'Airtable not configured' });
+    }
+
     const branches = await airtableHelpers.find(TABLES.BRANCHES);
     
     const publicBranches = branches.map(branch => ({
       id: branch.id,
-      name: branch.branch_name,
-      address: branch.location_address,
+      name: branch.branch_name || 'Branch',
+      address: branch.location_address || 'Address not available',
       latitude: branch.latitude,
       longitude: branch.longitude,
       phone: branch.phone,
@@ -21,8 +25,8 @@ router.get('/public', async (req, res) => {
 
     res.json(publicBranches);
   } catch (error) {
-    console.error('Get public branches error:', error.message);
-    res.status(500).json({ message: 'Failed to fetch branches', error: error.message });
+    console.error('Branches error:', error);
+    res.status(500).json({ message: 'Database connection failed', error: error.message });
   }
 });
 
