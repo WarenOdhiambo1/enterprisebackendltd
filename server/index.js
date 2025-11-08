@@ -197,9 +197,10 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/accounting', accountingRoutes);
 app.use('/api/receipts', receiptRoutes);
 app.use('/api/reports', reportRoutes);
-// app.use('/api/documents', documentRoutes); // Temporarily disabled due to Google credentials issue
+// app.use('/api/documents', documentRoutes); // Disabled - add Google credentials first
 app.use('/api/diagnostics', diagnosticsRoutes);
 app.use('/auth', authCallbackRoutes);
+app.use('/api/data', require('./routes/data'));
 
 // Error handling middleware
 app.use((err, req, res, next) => {
