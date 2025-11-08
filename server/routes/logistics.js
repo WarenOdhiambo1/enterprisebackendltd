@@ -51,6 +51,43 @@ router.post('/vehicles', authenticateToken, auditLog('CREATE_VEHICLE'), async (r
   }
 });
 
+// Update vehicle
+router.put('/vehicles/:id', authenticateToken, auditLog('UPDATE_VEHICLE'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { plate_number, vehicle_type, purchase_date, current_branch_id } = req.body;
+
+    const vehicleData = {
+      plate_number,
+      vehicle_type,
+      purchase_date,
+      status: 'active'
+    };
+
+    if (current_branch_id && current_branch_id !== '') {
+      vehicleData.current_branch_id = [current_branch_id];
+    }
+
+    const vehicle = await airtableHelpers.update(TABLES.VEHICLES, id, vehicleData);
+    res.json(vehicle);
+  } catch (error) {
+    console.error('Update vehicle error:', error);
+    res.status(500).json({ message: 'Failed to update vehicle' });
+  }
+});
+
+// Delete vehicle
+router.delete('/vehicles/:id', authenticateToken, auditLog('DELETE_VEHICLE'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    await airtableHelpers.delete(TABLES.VEHICLES, id);
+    res.json({ message: 'Vehicle deleted successfully' });
+  } catch (error) {
+    console.error('Delete vehicle error:', error);
+    res.status(500).json({ message: 'Failed to delete vehicle' });
+  }
+});
+
 // Get trips
 router.get('/trips', authenticateToken, async (req, res) => {
   try {
