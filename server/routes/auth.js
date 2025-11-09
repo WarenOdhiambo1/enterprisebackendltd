@@ -118,6 +118,7 @@ router.post('/login', async (req, res) => {
         });
       }
 
+      const { mfaToken } = req.body;
       if (!mfaToken) {
         return res.status(200).json({ 
           requiresMfa: true,
