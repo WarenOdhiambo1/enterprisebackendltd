@@ -7,24 +7,48 @@ Airtable.configure({
 
 const base = Airtable.base(process.env.AIRTABLE_BASE_ID);
 
-// Table names mapping (exact match with Airtable - lowercase)
+// Table names mapping (verified working from discovery)
 const TABLES = {
   BRANCHES: 'branches',
-  EMPLOYEES: 'employees',
+  EMPLOYEES: 'Employees', 
   STOCK: 'stock',
-  STOCK_MOVEMENTS: 'stock_movements',
+  STOCK_MOVEMENTS: 'Stock_Movements',
   SALES: 'sales',
-  SALE_ITEMS: 'sale_items',
-  EXPENSES: 'expenses',
+  SALE_ITEMS: 'Sale_Items',
+  EXPENSES: 'Expenses',
   VEHICLES: 'vehicles',
-  TRIPS: 'trips',
-  VEHICLE_MAINTENANCE: 'vehicle_maintenance',
-  ORDERS: 'orders',
-  ORDER_ITEMS: 'order_items',
-  PAYROLL: 'payroll',
-  AUDIT_LOGS: 'audit_logs',
-  ERP_SETTINGS: 'erp_settings',
-  DOCUMENTS: 'documents'
+  TRIPS: 'Trips',
+  VEHICLE_MAINTENANCE: 'Vehicle_Maintenance',
+  ORDERS: 'Orders',
+  ORDER_ITEMS: 'Order_Items',
+  PAYROLL: 'Payroll',
+  AUDIT_LOGS: 'Audit_Logs',
+  ERP_SETTINGS: 'ERP_Settings',
+  DOCUMENTS: 'Documents'
+};
+
+// Field mappings for relationships
+const FIELD_MAPPINGS = {
+  // Employee fields
+  EMPLOYEE_BRANCH: 'branch_id',
+  EMPLOYEE_ROLE: 'role',
+  
+  // Stock fields  
+  STOCK_BRANCH: 'branch_id',
+  STOCK_PRODUCT_ID: 'product_id',
+  STOCK_QUANTITY: 'quantity_available',
+  
+  // Sales fields
+  SALES_BRANCH: 'branch_id',
+  SALES_EMPLOYEE: 'employee_id',
+  
+  // Vehicle fields
+  VEHICLE_PLATE: 'plate_number',
+  VEHICLE_DRIVER: 'driver_id',
+  
+  // Trip fields
+  TRIP_VEHICLE: 'vehicle_plate_number',
+  TRIP_DRIVER: 'driver_id'
 };
 
 // Helper functions for Airtable operations
@@ -101,5 +125,6 @@ const airtableHelpers = {
 module.exports = {
   base,
   TABLES,
+  FIELD_MAPPINGS,
   airtableHelpers
 };

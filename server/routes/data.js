@@ -77,7 +77,18 @@ router.get('/:tableName', authenticateToken, async (req, res) => {
       filterFormula = filterFormula ? `AND(${filterFormula}, ${branchFilter})` : branchFilter;
     }
 
-    const sortOptions = sort ? JSON.parse(sort) : [{ field: 'created_at', direction: 'desc' }];
+    // Safely parse sort options
+    let sortOptions;
+    try {
+      sortOptions = sort ? JSON.parse(sort) : [{ field: 'created_at', direction: 'desc' }];
+      // Validate sort structure
+      if (!Array.isArray(sortOptions)) {
+        sortOptions = [{ field: 'created_at', direction: 'desc' }];
+      }
+    } catch (parseError) {
+      console.warn('Invalid sort parameter:', sort);
+      sortOptions = [{ field: 'created_at', direction: 'desc' }];
+    }
     const records = await directAirtableHelpers.find(tableName, filterFormula, sortOptions);
     
     // Apply limit if specified

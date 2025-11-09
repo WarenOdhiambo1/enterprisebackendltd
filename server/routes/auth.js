@@ -7,11 +7,18 @@ const QRCode = require('qrcode');
 const { airtableHelpers, TABLES } = require('../config/airtable');
 const Encryption = require('../utils/encryption');
 
-// CSRF protection middleware (disabled in development)
+// CSRF protection middleware (configurable)
 const csrfProtection = (req, res, next) => {
-  if (process.env.NODE_ENV === 'development') {
+  // Skip CSRF for API endpoints that don't modify data
+  if (req.method === 'GET' && !req.path.includes('/list-users')) {
     return next();
   }
+  
+  // Skip CSRF in development for easier testing
+  if (process.env.NODE_ENV === 'development' && process.env.SKIP_CSRF === 'true') {
+    return next();
+  }
+  
   const token = req.headers['x-csrf-token'] || req.body._csrf;
   if (!token) {
     return res.status(403).json({ message: 'CSRF token required' });
@@ -36,8 +43,8 @@ router.get('/test', (req, res) => {
   });
 });
 
-// List all users in database (for debugging)
-router.get('/list-users', async (req, res) => {
+// List all users in database (for debugging) - ADMIN ONLY
+router.get('/list-users', csrfProtection, async (req, res) => {
   try {
     const Airtable = require('airtable');
     Airtable.configure({
@@ -68,8 +75,8 @@ router.get('/list-users', async (req, res) => {
   }
 });
 
-// Diagnostic route for Airtable connection
-router.get('/test-airtable', async (req, res) => {
+// Diagnostic route for Airtable connection - ADMIN ONLY  
+router.get('/test-airtable', csrfProtection, async (req, res) => {
   try {
     console.log('Testing Airtable connection...');
     

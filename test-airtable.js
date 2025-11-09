@@ -19,8 +19,8 @@ async function testAirtable() {
     const hashedPassword = await bcrypt.hash('AdminPassword123!', 12);
     
     const adminData = {
-      full_name: 'Test Admin',
-      email: 'admin@test.com',
+      full_name: process.env.ADMIN_NAME || 'System Admin',
+      email: process.env.ADMIN_EMAIL || 'admin@company.com',
       role: 'admin',
       password_hash: hashedPassword,
       is_active: true,
