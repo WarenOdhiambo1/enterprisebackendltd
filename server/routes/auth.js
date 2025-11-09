@@ -358,6 +358,13 @@ router.post('/login', async (req, res) => {
 
     // Update last login and ensure user is active
     try {
+      const Airtable = require('airtable');
+      Airtable.configure({
+        endpointUrl: 'https://api.airtable.com',
+        apiKey: process.env.AIRTABLE_API_KEY
+      });
+      const base = Airtable.base(process.env.AIRTABLE_BASE_ID);
+      
       await base('Employees').update([{
         id: user.id,
         fields: { 
