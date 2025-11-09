@@ -78,9 +78,15 @@ router.post('/branch/:branchId', authenticateToken, async (req, res) => {
       recorded_by: [req.user.id]
     };
     
-    // Only add branch_id if it's not 'default'
+    // Add branch_id - use first available branch if 'default'
     if (branchId && branchId !== 'default') {
       saleData.branch_id = [branchId];
+    } else {
+      // Get first available branch for 'default'
+      const allBranches = await airtableHelpers.find(TABLES.BRANCHES);
+      if (allBranches.length > 0) {
+        saleData.branch_id = [allBranches[0].id];
+      }
     }
     
     // Add customer name if provided

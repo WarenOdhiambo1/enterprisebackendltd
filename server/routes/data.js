@@ -299,9 +299,9 @@ router.get('/page/:pageName', authenticateToken, async (req, res) => {
         let expensesFilter = '';
         
         if (filterBranchId) {
-          stockFilter = `{branch_id} = '${filterBranchId}'`;
-          salesFilter = `{branch_id} = '${filterBranchId}'`;
-          expensesFilter = `{branch_id} = '${filterBranchId}'`;
+          stockFilter = `FIND('${filterBranchId}', ARRAYJOIN({branch_id}))`;
+          salesFilter = `FIND('${filterBranchId}', ARRAYJOIN({branch_id}))`;
+          expensesFilter = `FIND('${filterBranchId}', ARRAYJOIN({branch_id}))`;
         }
         
         const stock = await airtableHelpers.find(TABLES.STOCK, stockFilter).catch(() => []);
