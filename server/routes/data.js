@@ -1,5 +1,59 @@
 const express = require('express');
-const { airtableHelpers, TABLES } = require('../config/airtable');
+const { TABLES } = require('../config/airtable');
+
+// Direct Airtable helper functions
+const directAirtableHelpers = {
+  async find(tableName, filterFormula, sort) {
+    const Airtable = require('airtable');
+    Airtable.configure({
+      endpointUrl: 'https://api.airtable.com',
+      apiKey: process.env.AIRTABLE_API_KEY
+    });
+    const base = Airtable.base(process.env.AIRTABLE_BASE_ID);
+    
+    const selectOptions = {};
+    if (filterFormula && typeof filterFormula === 'string' && filterFormula.trim()) {
+      selectOptions.filterByFormula = filterFormula;
+    }
+    if (sort && Array.isArray(sort) && sort.length > 0) {
+      selectOptions.sort = sort;
+    }
+    
+    const records = await base(tableName).select(selectOptions).all();
+    return records.map(record => ({
+      id: record.id,
+      ...record.fields
+    }));
+  },
+  
+  async create(tableName, fields) {
+    const Airtable = require('airtable');
+    const base = Airtable.base(process.env.AIRTABLE_BASE_ID);
+    const records = await base(tableName).create([{ fields }]);
+    return { id: records[0].id, ...records[0].fields };
+  },
+  
+  async update(tableName, recordId, fields) {
+    const Airtable = require('airtable');
+    const base = Airtable.base(process.env.AIRTABLE_BASE_ID);
+    const records = await base(tableName).update([{ id: recordId, fields }]);
+    return { id: records[0].id, ...records[0].fields };
+  },
+  
+  async delete(tableName, recordId) {
+    const Airtable = require('airtable');
+    const base = Airtable.base(process.env.AIRTABLE_BASE_ID);
+    await base(tableName).destroy([recordId]);
+    return { id: recordId, deleted: true };
+  },
+  
+  async findById(tableName, recordId) {
+    const Airtable = require('airtable');
+    const base = Airtable.base(process.env.AIRTABLE_BASE_ID);
+    const record = await base(tableName).find(recordId);
+    return { id: record.id, ...record.fields };
+  }
+};
 const { authenticateToken, authorizeRoles } = require('../middleware/auth');
 
 const router = express.Router();
@@ -24,7 +78,7 @@ router.get('/:tableName', authenticateToken, async (req, res) => {
     }
 
     const sortOptions = sort ? JSON.parse(sort) : [{ field: 'created_at', direction: 'desc' }];
-    const records = await airtableHelpers.find(tableName, filterFormula, sortOptions);
+    const records = await directAirtableHelpers.find(tableName, filterFormula, sortOptions);
     
     // Apply limit if specified
     const limitedRecords = limit ? records.slice(0, parseInt(limit)) : records;
@@ -62,7 +116,7 @@ router.post('/:tableName', authenticateToken, async (req, res) => {
       recordData.branch_id = req.user.branchId;
     }
 
-    const record = await airtableHelpers.create(tableName, recordData);
+    const record = await directAirtableHelpers.create(tableName, recordData);
     res.status(201).json(record);
   } catch (error) {
     console.error(`Error creating ${req.params.tableName}:`, error);
@@ -89,7 +143,7 @@ router.put('/:tableName/:recordId', authenticateToken, async (req, res) => {
       updated_by: req.user.userId
     };
 
-    const record = await airtableHelpers.update(tableName, recordId, updateData);
+    const record = await directAirtableHelpers.update(tableName, recordId, updateData);
     res.json(record);
   } catch (error) {
     console.error(`Error updating ${req.params.tableName}:`, error);
@@ -127,7 +181,7 @@ router.get('/:tableName/:recordId', authenticateToken, async (req, res) => {
       return res.status(400).json({ message: 'Invalid table name' });
     }
 
-    const record = await airtableHelpers.findById(tableName, recordId);
+    const record = await directAirtableHelpers.findById(tableName, recordId);
     res.json(record);
   } catch (error) {
     console.error(`Error fetching ${req.params.tableName} record:`, error);
@@ -205,9 +259,9 @@ router.get('/page/:pageName', authenticateToken, async (req, res) => {
     switch (pageName) {
       case 'hr':
         // Fetch HR-related data
-        const employees = await airtableHelpers.find(TABLES.EMPLOYEES).catch(() => []);
-        const payroll = await airtableHelpers.find(TABLES.PAYROLL).catch(() => []);
-        const hrBranches = await airtableHelpers.find(TABLES.BRANCHES).catch(() => []);
+        const employees = await directAirtableHelpers.find(TABLES.EMPLOYEES).catch(() => []);
+        const payroll = await directAirtableHelpers.find(TABLES.PAYROLL).catch(() => []);
+        const hrBranches = await directAirtableHelpers.find(TABLES.BRANCHES).catch(() => []);
         
         // Clean and format data
         const cleanEmployees = employees.map(emp => ({
@@ -259,9 +313,9 @@ router.get('/page/:pageName', authenticateToken, async (req, res) => {
         
       case 'logistics':
         // Existing logistics data logic
-        const vehicles = await airtableHelpers.find(TABLES.VEHICLES).catch(() => []);
-        const trips = await airtableHelpers.find(TABLES.TRIPS).catch(() => []);
-        const maintenance = await airtableHelpers.find(TABLES.VEHICLE_MAINTENANCE).catch(() => []);
+        const vehicles = await directAirtableHelpers.find(TABLES.VEHICLES).catch(() => []);
+        const trips = await directAirtableHelpers.find(TABLES.TRIPS).catch(() => []);
+        const maintenance = await directAirtableHelpers.find(TABLES.VEHICLE_MAINTENANCE).catch(() => []);
         
         res.json({
           vehicles: vehicles || [],
@@ -280,9 +334,9 @@ router.get('/page/:pageName', authenticateToken, async (req, res) => {
           productFilter = `{branch_id} = '${filterBranchId}'`;
         }
         
-        const adminEmployees = await airtableHelpers.find(TABLES.EMPLOYEES, employeeFilter).catch(() => []);
-        const adminBranches = await airtableHelpers.find(TABLES.BRANCHES).catch(() => []);
-        const products = await airtableHelpers.find(TABLES.STOCK, productFilter).catch(() => []);
+        const adminEmployees = await directAirtableHelpers.find(TABLES.EMPLOYEES, employeeFilter).catch(() => []);
+        const adminBranches = await directAirtableHelpers.find(TABLES.BRANCHES).catch(() => []);
+        const products = await directAirtableHelpers.find(TABLES.STOCK, productFilter).catch(() => []);
         
         res.json({
           employees: adminEmployees || [],
@@ -304,11 +358,11 @@ router.get('/page/:pageName', authenticateToken, async (req, res) => {
           expensesFilter = `FIND('${filterBranchId}', ARRAYJOIN({branch_id}))`;
         }
         
-        const stock = await airtableHelpers.find(TABLES.STOCK, stockFilter).catch(() => []);
-        const sales = await airtableHelpers.find(TABLES.SALES, salesFilter).catch(() => []);
-        const saleItems = await airtableHelpers.find(TABLES.SALE_ITEMS).catch(() => []);
-        const expenses = await airtableHelpers.find(TABLES.EXPENSES, expensesFilter).catch(() => []);
-        const salesBranches = await airtableHelpers.find(TABLES.BRANCHES).catch(() => []);
+        const stock = await directAirtableHelpers.find(TABLES.STOCK, stockFilter).catch(() => []);
+        const sales = await directAirtableHelpers.find(TABLES.SALES, salesFilter).catch(() => []);
+        const saleItems = await directAirtableHelpers.find(TABLES.SALE_ITEMS).catch(() => []);
+        const expenses = await directAirtableHelpers.find(TABLES.EXPENSES, expensesFilter).catch(() => []);
+        const salesBranches = await directAirtableHelpers.find(TABLES.BRANCHES).catch(() => []);
         
         // Clean and format stock data
         const cleanStock = stock.map(item => ({

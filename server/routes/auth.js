@@ -136,10 +136,24 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ message: 'Only admin registration is allowed' });
     }
 
-    // Check for existing admins with fallback
+    // Check for existing admins with direct Airtable call
     let existingAdmins = [];
     try {
-      existingAdmins = await airtableHelpers.find(TABLES.EMPLOYEES, '{role} = "admin"');
+      const Airtable = require('airtable');
+      Airtable.configure({
+        endpointUrl: 'https://api.airtable.com',
+        apiKey: process.env.AIRTABLE_API_KEY
+      });
+      const base = Airtable.base(process.env.AIRTABLE_BASE_ID);
+      
+      const records = await base('Employees').select({
+        filterByFormula: '{role} = "admin"'
+      }).all();
+      
+      existingAdmins = records.map(record => ({
+        id: record.id,
+        ...record.fields
+      }));
     } catch (airtableError) {
       console.warn('Airtable check failed, allowing registration:', airtableError.message);
     }
@@ -161,14 +175,15 @@ router.post('/register', async (req, res) => {
     };
     
     try {
-      await airtableHelpers.create(TABLES.EMPLOYEES, adminData);
+      const Airtable = require('airtable');
+      const base = Airtable.base(process.env.AIRTABLE_BASE_ID);
+      await base('Employees').create([{ fields: adminData }]);
       res.status(201).json({ message: 'Admin account created successfully' });
     } catch (createError) {
       console.error('Failed to create admin in Airtable:', createError.message);
-      // For now, return success even if Airtable fails
-      res.status(201).json({ 
-        message: 'Admin account creation initiated',
-        note: 'Please use existing credentials to login'
+      res.status(500).json({ 
+        message: 'Admin account creation failed',
+        error: createError.message
       });
     }
   } catch (error) {
@@ -207,13 +222,30 @@ router.post('/login', async (req, res) => {
     console.log('Airtable config check passed, attempting login...');
     console.log('Login credentials check:', { email, hasPassword: !!password });
 
-    // Find user in Airtable with fallback authentication
+    // Find user in Airtable with direct connection and fallback
     let user;
     try {
-      console.log('Attempting Airtable connection...');
-      const allUsers = await airtableHelpers.find(TABLES.EMPLOYEES);
-      user = allUsers.find(u => u.email === email);
-      console.log('User found via helpers:', !!user);
+      console.log('Attempting direct Airtable connection...');
+      const Airtable = require('airtable');
+      Airtable.configure({
+        endpointUrl: 'https://api.airtable.com',
+        apiKey: process.env.AIRTABLE_API_KEY
+      });
+      const base = Airtable.base(process.env.AIRTABLE_BASE_ID);
+      
+      const records = await base('Employees').select({
+        filterByFormula: `{email} = '${email}'`
+      }).all();
+      
+      console.log('Found', records.length, 'matching users');
+      
+      if (records.length > 0) {
+        user = {
+          id: records[0].id,
+          ...records[0].fields
+        };
+        console.log('User found via direct connection:', { id: user.id, email: user.email, role: user.role });
+      }
     } catch (airtableError) {
       console.error('Airtable error, using fallback auth:', airtableError.message);
       // Fallback authentication for production reliability
@@ -306,9 +338,12 @@ router.post('/login', async (req, res) => {
     // Update last login (optional, don't fail if this fails)
     try {
       if (user.password_hash !== '$2a$12$dummy.hash.for.fallback.auth') {
-        await airtableHelpers.update(TABLES.EMPLOYEES, user.id, {
-          last_login: new Date().toISOString()
-        });
+        const Airtable = require('airtable');
+        const base = Airtable.base(process.env.AIRTABLE_BASE_ID);
+        await base('Employees').update([{
+          id: user.id,
+          fields: { last_login: new Date().toISOString() }
+        }]);
       }
     } catch (updateError) {
       console.warn('Failed to update last login:', updateError.message);
