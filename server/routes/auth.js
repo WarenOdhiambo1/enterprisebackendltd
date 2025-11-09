@@ -46,7 +46,8 @@ router.get('/test-airtable', async (req, res) => {
       hasApiKey: !!process.env.AIRTABLE_API_KEY,
       hasBaseId: !!process.env.AIRTABLE_BASE_ID,
       apiKeyLength: process.env.AIRTABLE_API_KEY ? process.env.AIRTABLE_API_KEY.length : 0,
-      baseIdLength: process.env.AIRTABLE_BASE_ID ? process.env.AIRTABLE_BASE_ID.length : 0
+      baseIdLength: process.env.AIRTABLE_BASE_ID ? process.env.AIRTABLE_BASE_ID.length : 0,
+      baseIdValue: process.env.AIRTABLE_BASE_ID ? process.env.AIRTABLE_BASE_ID.substring(0, 8) + '...' : 'Not set'
     };
     
     console.log('Environment check:', envCheck);
@@ -59,24 +60,38 @@ router.get('/test-airtable', async (req, res) => {
       });
     }
     
-    // Test Airtable connection
-    const allUsers = await airtableHelpers.find(TABLES.EMPLOYEES);
-    console.log('Found users:', allUsers.length);
+    // Test direct Airtable connection without helpers
+    const Airtable = require('airtable');
+    Airtable.configure({
+      endpointUrl: 'https://api.airtable.com',
+      apiKey: process.env.AIRTABLE_API_KEY
+    });
+    const base = Airtable.base(process.env.AIRTABLE_BASE_ID);
     
-    const sampleUser = allUsers.length > 0 ? {
-      id: allUsers[0].id,
-      email: allUsers[0].email,
-      role: allUsers[0].role,
-      hasPassword: !!allUsers[0].password_hash,
-      isActive: allUsers[0].is_active
+    // Try to list records from Employees table
+    const records = await base('Employees').select({ maxRecords: 3 }).all();
+    console.log('Direct Airtable test - Found records:', records.length);
+    
+    const users = records.map(record => ({
+      id: record.id,
+      ...record.fields
+    }));
+    
+    const sampleUser = users.length > 0 ? {
+      id: users[0].id,
+      email: users[0].email,
+      role: users[0].role,
+      hasPassword: !!users[0].password_hash,
+      isActive: users[0].is_active
     } : null;
     
     res.json({
       status: 'success',
       message: 'Airtable connection working',
       envCheck,
-      usersFound: allUsers.length,
+      usersFound: users.length,
       sampleUser,
+      tablesTested: ['Employees'],
       timestamp: new Date().toISOString()
     });
     
@@ -86,7 +101,8 @@ router.get('/test-airtable', async (req, res) => {
       status: 'error',
       message: error.message,
       errorType: error.name,
-      stack: error.stack,
+      statusCode: error.statusCode,
+      error: error.error,
       timestamp: new Date().toISOString()
     });
   }
@@ -172,17 +188,35 @@ router.post('/login', async (req, res) => {
 
     console.log('Airtable config check passed, fetching users...');
 
-    // Find user in Airtable
-    let allUsers, user;
+    // Find user in Airtable using direct connection
+    let user;
     try {
-      allUsers = await airtableHelpers.find(TABLES.EMPLOYEES);
-      console.log('Found', allUsers.length, 'users in database');
-      user = allUsers.find(u => u.email === email);
-      console.log('User found:', !!user);
+      console.log('Attempting direct Airtable connection...');
+      const Airtable = require('airtable');
+      Airtable.configure({
+        endpointUrl: 'https://api.airtable.com',
+        apiKey: process.env.AIRTABLE_API_KEY
+      });
+      const base = Airtable.base(process.env.AIRTABLE_BASE_ID);
+      
+      const records = await base('Employees').select({
+        filterByFormula: `{email} = '${email}'`
+      }).all();
+      
+      console.log('Found', records.length, 'matching users');
+      
+      if (records.length > 0) {
+        user = {
+          id: records[0].id,
+          ...records[0].fields
+        };
+        console.log('User found:', { id: user.id, email: user.email, role: user.role });
+      }
     } catch (airtableError) {
       console.error('Airtable connection error:', {
         message: airtableError.message,
-        stack: airtableError.stack,
+        statusCode: airtableError.statusCode,
+        error: airtableError.error,
         name: airtableError.name
       });
       throw new Error(`Database connection failed: ${airtableError.message}`);
@@ -257,9 +291,12 @@ router.post('/login', async (req, res) => {
 
     // Update last login (optional, don't fail if this fails)
     try {
-      await airtableHelpers.update(TABLES.EMPLOYEES, user.id, {
-        last_login: new Date().toISOString()
-      });
+      const Airtable = require('airtable');
+      const base = Airtable.base(process.env.AIRTABLE_BASE_ID);
+      await base('Employees').update([{
+        id: user.id,
+        fields: { last_login: new Date().toISOString() }
+      }]);
     } catch (updateError) {
       console.warn('Failed to update last login:', updateError.message);
     }
