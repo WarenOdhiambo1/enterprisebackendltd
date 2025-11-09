@@ -7,16 +7,16 @@ Airtable.configure({
 
 const base = Airtable.base(process.env.AIRTABLE_BASE_ID);
 
-// Table names mapping (verified working from discovery)
+// Table names mapping (verified from Airtable schema)
 const TABLES = {
-  BRANCHES: 'branches',
+  BRANCHES: 'Branches',
   EMPLOYEES: 'Employees', 
-  STOCK: 'stock',
+  STOCK: 'Stock',
   STOCK_MOVEMENTS: 'Stock_Movements',
-  SALES: 'sales',
+  SALES: 'Sales',
   SALE_ITEMS: 'Sale_Items',
   EXPENSES: 'Expenses',
-  VEHICLES: 'vehicles',
+  VEHICLES: 'Vehicles',
   TRIPS: 'Trips',
   VEHICLE_MAINTENANCE: 'Vehicle_Maintenance',
   ORDERS: 'Orders',
