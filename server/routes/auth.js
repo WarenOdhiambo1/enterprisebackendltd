@@ -292,7 +292,7 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
-    if (!user.is_active) {
+    if (user.is_active === false) {
       return res.status(401).json({ message: 'Account is deactivated' });
     }
 
@@ -356,11 +356,14 @@ router.post('/login', async (req, res) => {
       { expiresIn: process.env.JWT_REFRESH_EXPIRE || '7d' }
     );
 
-    // Update last login in database
+    // Update last login and ensure user is active
     try {
       await base('Employees').update([{
         id: user.id,
-        fields: { last_login: new Date().toISOString() }
+        fields: { 
+          last_login: new Date().toISOString(),
+          is_active: true
+        }
       }]);
       console.log('Updated last login for user:', user.email);
     } catch (updateError) {
