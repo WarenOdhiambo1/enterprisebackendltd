@@ -202,6 +202,7 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/diagnostics', diagnosticsRoutes);
 app.use('/auth', authCallbackRoutes);
 app.use('/api/data', require('./routes/data'));
+app.use('/api/debug', require('./routes/debug'));
 
 // Error handling middleware
 app.use((err, req, res, next) => {

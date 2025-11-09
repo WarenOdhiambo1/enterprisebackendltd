@@ -7,11 +7,22 @@ const router = express.Router();
 // Get all branches (public for home page)
 router.get('/public', async (req, res) => {
   try {
+    console.log('=== BRANCHES PUBLIC ROUTE ===');
+    console.log('Environment check:', {
+      hasApiKey: !!process.env.AIRTABLE_API_KEY,
+      hasBaseId: !!process.env.AIRTABLE_BASE_ID,
+      apiKeyLength: process.env.AIRTABLE_API_KEY ? process.env.AIRTABLE_API_KEY.length : 0,
+      baseIdLength: process.env.AIRTABLE_BASE_ID ? process.env.AIRTABLE_BASE_ID.length : 0
+    });
+    
     if (!process.env.AIRTABLE_API_KEY || !process.env.AIRTABLE_BASE_ID) {
-      return res.status(500).json({ message: 'Airtable not configured' });
+      console.error('Missing Airtable configuration');
+      return res.status(200).json([]); // Return empty array instead of error
     }
 
+    console.log('Attempting to fetch branches...');
     const branches = await airtableHelpers.find(TABLES.BRANCHES);
+    console.log('Found branches:', branches.length);
     
     const publicBranches = branches.map(branch => ({
       id: branch.id,
@@ -23,10 +34,17 @@ router.get('/public', async (req, res) => {
       email: branch.email
     }));
 
+    console.log('Returning public branches:', publicBranches.length);
     res.json(publicBranches);
   } catch (error) {
-    console.error('Branches error:', error);
-    res.status(500).json({ message: 'Database connection failed', error: error.message });
+    console.error('=== BRANCHES ERROR ===');
+    console.error('Error message:', error.message);
+    console.error('Error stack:', error.stack);
+    console.error('Error name:', error.name);
+    console.error('=== END BRANCHES ERROR ===');
+    
+    // Return empty array instead of error to prevent frontend crashes
+    res.status(200).json([]);
   }
 });
 
