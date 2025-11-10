@@ -109,9 +109,13 @@ router.post('/', authenticateToken, authorizeRoles(['admin', 'manager', 'boss'])
     }));
     
     // Update order with items
-    await airtableHelpers.update(TABLES.ORDERS, order.id, {
-      items: JSON.stringify(orderItems)
-    });
+    try {
+      await airtableHelpers.update(TABLES.ORDERS, order.id, {
+        items: JSON.stringify(orderItems)
+      });
+    } catch (updateError) {
+      console.log('Items update failed, order created without items:', updateError.message);
+    }
 
     res.status(201).json({
       message: 'Order created successfully',
@@ -280,43 +284,51 @@ router.post('/:orderId/complete', authenticateToken, authorizeRoles(['admin', 'm
     for (const item of completedItems) {
       console.log('Processing item:', item);
       
-      // Add to branch stock if destination specified
-      if (item.branchDestinationId && item.quantityOrdered > 0) {
-        // Check if product already exists in branch stock
-        const existingStock = await airtableHelpers.find(TABLES.STOCK);
-        const branchStock = existingStock.filter(s => 
-          s.branch_id && s.branch_id.includes(item.branchDestinationId) && 
-          s.product_name === item.productName
-        );
+      try {
+        // Add to branch stock if destination specified
+        if (item.branchDestinationId && item.quantityOrdered > 0) {
+          // Check if product already exists in branch stock
+          const existingStock = await airtableHelpers.find(TABLES.STOCK);
+          const branchStock = existingStock.filter(s => 
+            s.branch_id && s.branch_id.includes(item.branchDestinationId) && 
+            s.product_name === item.productName
+          );
 
-        if (branchStock.length > 0) {
-          // Update existing stock
-          const stockItem = branchStock[0];
-          const newQuantity = stockItem.quantity_available + item.quantityOrdered;
-          await airtableHelpers.update(TABLES.STOCK, stockItem.id, {
-            quantity_available: newQuantity,
-            unit_price: item.purchasePrice
-          });
-        } else {
-          // Create new stock entry
-          await airtableHelpers.create(TABLES.STOCK, {
-            branch_id: [item.branchDestinationId],
-            product_id: item.productId,
-            product_name: item.productName,
-            quantity_available: item.quantityOrdered,
-            reorder_level: 10,
-            unit_price: item.purchasePrice
-          });
+          if (branchStock.length > 0) {
+            // Update existing stock
+            const stockItem = branchStock[0];
+            const newQuantity = stockItem.quantity_available + item.quantityOrdered;
+            await airtableHelpers.update(TABLES.STOCK, stockItem.id, {
+              quantity_available: newQuantity,
+              unit_price: item.purchasePrice
+            });
+          } else {
+            // Create new stock entry
+            await airtableHelpers.create(TABLES.STOCK, {
+              branch_id: [item.branchDestinationId],
+              product_id: item.productId,
+              product_name: item.productName,
+              quantity_available: item.quantityOrdered,
+              reorder_level: 10,
+              unit_price: item.purchasePrice
+            });
+          }
+
+          // Create stock movement record
+          try {
+            await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, {
+              product_name: item.productName,
+              quantity: item.quantityOrdered,
+              movement_type: 'purchase',
+              movement_date: new Date().toISOString().split('T')[0],
+              reference_id: orderId
+            });
+          } catch (movementError) {
+            console.log('Stock movement creation failed:', movementError.message);
+          }
         }
-
-        // Create stock movement record
-        await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, {
-          product_name: item.productName,
-          quantity: item.quantityOrdered,
-          movement_type: 'purchase',
-          movement_date: new Date().toISOString().split('T')[0],
-          reference_id: orderId
-        });
+      } catch (itemError) {
+        console.log('Failed to process item:', item.productName, itemError.message);
       }
     }
 
