@@ -62,7 +62,7 @@ router.post('/branch/:branchId', authenticateToken, async (req, res) => {
     const saleData = {
       total_amount: totalAmount,
       payment_method: payment_method || 'cash',
-      sale_date: new Date().toISOString().split('T')[0]
+      sale_date: req.body.sale_date || new Date().toISOString().split('T')[0]
     };
     
     if (branchId && branchId !== 'default') {
@@ -125,8 +125,9 @@ router.post('/branch/:branchId', authenticateToken, async (req, res) => {
     }
 
     res.status(201).json({
-      sale: { ...sale, items: saleItems },
-      message: 'Sale recorded successfully'
+      success: true,
+      message: 'Sale recorded successfully',
+      sale: { ...sale, items: saleItems }
     });
 
   } catch (error) {
