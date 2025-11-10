@@ -33,21 +33,16 @@ router.get('/', authenticateToken, authorizeRoles(['admin', 'manager', 'boss']),
 
     const orders = await airtableHelpers.find(TABLES.ORDERS, filterFormula);
     
-    // Parse items from JSON or create empty array
-    const ordersWithItems = orders.map(order => {
-      let items = [];
-      try {
-        if (order.items && typeof order.items === 'string') {
-          items = JSON.parse(order.items);
-        } else if (Array.isArray(order.items)) {
-          items = order.items;
-        }
-      } catch (e) {
-        console.log('Error parsing items for order:', order.id, e.message);
-        items = [];
-      }
-      return { ...order, items };
-    });
+    // Get order items from ORDER_ITEMS table
+    const ordersWithItems = await Promise.all(
+      orders.map(async (order) => {
+        const items = await airtableHelpers.find(
+          TABLES.ORDER_ITEMS,
+          `{order_id} = "${order.id}"`
+        );
+        return { ...order, items };
+      })
+    );
 
     res.json(ordersWithItems);
   } catch (error) {
@@ -100,21 +95,18 @@ router.post('/', authenticateToken, authorizeRoles(['admin', 'manager', 'boss'])
     
     const order = await airtableHelpers.create(TABLES.ORDERS, orderData);
 
-    // Store items as JSON in order record
-    const orderItems = items.map(item => ({
-      product_name: item.product_name,
-      quantity_ordered: Number(item.quantity_ordered),
-      purchase_price_per_unit: Number(item.purchase_price_per_unit),
-      branch_destination_id: item.branch_destination_id
-    }));
-    
-    // Update order with items
-    try {
-      await airtableHelpers.update(TABLES.ORDERS, order.id, {
-        items: JSON.stringify(orderItems)
+    // Create order items in ORDER_ITEMS table
+    const orderItems = [];
+    for (const item of items) {
+      const orderItem = await airtableHelpers.create(TABLES.ORDER_ITEMS, {
+        order_id: [order.id],
+        product_name: item.product_name,
+        quantity_ordered: Number(item.quantity_ordered),
+        purchase_price_per_unit: Number(item.purchase_price_per_unit),
+        quantity_received: 0,
+        branch_destination_id: item.branch_destination_id ? [item.branch_destination_id] : null
       });
-    } catch (updateError) {
-      console.log('Items update failed, order created without items:', updateError.message);
+      orderItems.push(orderItem);
     }
 
     res.status(201).json({
@@ -284,51 +276,47 @@ router.post('/:orderId/complete', authenticateToken, authorizeRoles(['admin', 'm
     for (const item of completedItems) {
       console.log('Processing item:', item);
       
-      try {
-        // Add to branch stock if destination specified
-        if (item.branchDestinationId && item.quantityOrdered > 0) {
-          // Check if product already exists in branch stock
-          const existingStock = await airtableHelpers.find(TABLES.STOCK);
-          const branchStock = existingStock.filter(s => 
-            s.branch_id && s.branch_id.includes(item.branchDestinationId) && 
-            s.product_name === item.productName
-          );
+      // Update order item as received
+      await airtableHelpers.update(TABLES.ORDER_ITEMS, item.orderItemId, {
+        quantity_received: item.quantityOrdered
+      });
+      
+      // Add to branch stock if destination specified
+      if (item.branchDestinationId && item.quantityOrdered > 0) {
+        const existingStock = await airtableHelpers.find(TABLES.STOCK);
+        const branchStock = existingStock.filter(s => 
+          s.branch_id && s.branch_id.includes(item.branchDestinationId) && 
+          s.product_name === item.productName
+        );
 
-          if (branchStock.length > 0) {
-            // Update existing stock
-            const stockItem = branchStock[0];
-            const newQuantity = stockItem.quantity_available + item.quantityOrdered;
-            await airtableHelpers.update(TABLES.STOCK, stockItem.id, {
-              quantity_available: newQuantity,
-              unit_price: item.purchasePrice
-            });
-          } else {
-            // Create new stock entry
-            await airtableHelpers.create(TABLES.STOCK, {
-              branch_id: [item.branchDestinationId],
-              product_id: item.productId,
-              product_name: item.productName,
-              quantity_available: item.quantityOrdered,
-              reorder_level: 10,
-              unit_price: item.purchasePrice
-            });
-          }
-
-          // Create stock movement record
-          try {
-            await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, {
-              product_name: item.productName,
-              quantity: item.quantityOrdered,
-              movement_type: 'purchase',
-              movement_date: new Date().toISOString().split('T')[0],
-              reference_id: orderId
-            });
-          } catch (movementError) {
-            console.log('Stock movement creation failed:', movementError.message);
-          }
+        if (branchStock.length > 0) {
+          // Update existing stock
+          const stockItem = branchStock[0];
+          const newQuantity = stockItem.quantity_available + item.quantityOrdered;
+          await airtableHelpers.update(TABLES.STOCK, stockItem.id, {
+            quantity_available: newQuantity,
+            unit_price: item.purchasePrice
+          });
+        } else {
+          // Create new stock entry
+          await airtableHelpers.create(TABLES.STOCK, {
+            branch_id: [item.branchDestinationId],
+            product_id: item.productId,
+            product_name: item.productName,
+            quantity_available: item.quantityOrdered,
+            reorder_level: 10,
+            unit_price: item.purchasePrice
+          });
         }
-      } catch (itemError) {
-        console.log('Failed to process item:', item.productName, itemError.message);
+
+        // Create stock movement record
+        await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, {
+          product_name: item.productName,
+          quantity: item.quantityOrdered,
+          movement_type: 'purchase',
+          movement_date: new Date().toISOString().split('T')[0],
+          reference_id: orderId
+        });
       }
     }
 

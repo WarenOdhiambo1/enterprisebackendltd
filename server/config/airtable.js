@@ -20,6 +20,7 @@ const TABLES = {
   TRIPS: 'Trips',
   VEHICLE_MAINTENANCE: 'Vehicle_Maintenance',
   ORDERS: 'Orders',
+  ORDER_ITEMS: 'Order_Items',
   PAYROLL: 'Payroll',
   AUDIT_LOGS: 'Audit_Logs',
   ERP_SETTINGS: 'ERP_Settings',

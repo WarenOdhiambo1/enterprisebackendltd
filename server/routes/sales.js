@@ -222,17 +222,21 @@ router.post('/expenses/branch/:branchId', authenticateToken, auditLog('RECORD_EX
       expense_date: expense_date,
       category: category,
       amount: parseFloat(amount),
-      recorded_by: [req.user.id],
       created_at: new Date().toISOString()
     };
     
-    // Only add branch_id if it's not 'default'
+    // Add branch_id - use first available branch if 'default'
     if (branchId && branchId !== 'default') {
       expenseData.branch_id = [branchId];
+    } else {
+      const allBranches = await airtableHelpers.find(TABLES.BRANCHES);
+      if (allBranches.length > 0) {
+        expenseData.branch_id = [allBranches[0].id];
+      }
     }
     
     if (description) expenseData.description = description;
-    if (vehicle_id) expenseData.vehicle_id = [vehicle_id];
+    if (vehicle_plate_number) expenseData.vehicle_plate_number = vehicle_plate_number;
     
     const expense = await airtableHelpers.create(TABLES.EXPENSES, expenseData);
 
