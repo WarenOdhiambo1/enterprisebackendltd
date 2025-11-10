@@ -252,7 +252,9 @@ router.post('/expenses/branch/:branchId', authenticateToken, auditLog('RECORD_EX
       category: category,
       amount: parseFloat(amount),
       branch_id: [targetBranchId],
-      created_at: new Date().toISOString()
+      created_by: [req.user.id],
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
     };
     
     // Add optional fields
@@ -260,11 +262,11 @@ router.post('/expenses/branch/:branchId', authenticateToken, auditLog('RECORD_EX
       expenseData.description = description.trim();
     }
     
+    // Handle vehicle linking
     if (vehicle_plate_number && vehicle_plate_number.trim()) {
       expenseData.vehicle_plate_number = vehicle_plate_number.trim();
     }
     
-    // Link to vehicle if found
     if (vehicle_id) {
       expenseData.vehicle_id = [vehicle_id];
     }
@@ -274,16 +276,15 @@ router.post('/expenses/branch/:branchId', authenticateToken, auditLog('RECORD_EX
     console.log('Expense created successfully:', expense.id);
 
     // If vehicle-related and vehicle found, auto-create maintenance record
-    if (vehicle_id && req.user?.id) {
+    if (vehicle_id && (category === 'vehicle_related' || category === 'maintenance' || category === 'fuel')) {
       try {
         await airtableHelpers.create(TABLES.VEHICLE_MAINTENANCE, {
           vehicle_id: [vehicle_id],
           maintenance_date: expense_date,
-          maintenance_type: 'expense',
+          maintenance_type: category === 'fuel' ? 'fuel' : 'maintenance',
           cost: parseFloat(amount),
-          description: description || 'Expense recorded from sales',
-          recorded_by: [req.user.id],
-          expense_id: [expense.id]
+          description: description || `${category} expense recorded`,
+          recorded_by: [req.user.id]
         });
         console.log('Vehicle maintenance record created');
       } catch (maintenanceError) {
