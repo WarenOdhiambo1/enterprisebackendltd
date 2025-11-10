@@ -65,16 +65,11 @@ router.post('/', authenticateToken, authorizeRoles(['admin', 'manager', 'boss'])
       return res.status(400).json({ message: 'Supplier name, order date, and items are required' });
     }
 
-    // Validate items
+    // Basic validation
     for (const item of items) {
       if (!item.product_name || !item.quantity_ordered || !item.purchase_price_per_unit) {
         return res.status(400).json({ 
           message: 'Each item must have product name, quantity, and purchase price' 
-        });
-      }
-      if (item.quantity_ordered <= 0 || item.purchase_price_per_unit <= 0) {
-        return res.status(400).json({ 
-          message: 'Quantity and purchase price must be greater than 0' 
         });
       }
     }
@@ -85,32 +80,33 @@ router.post('/', authenticateToken, authorizeRoles(['admin', 'manager', 'boss'])
     }, 0);
 
     // Create order
-    const order = await airtableHelpers.create(TABLES.ORDERS, {
+    const orderData = {
       supplier_name,
       order_date,
-      expected_delivery_date: expected_delivery_date || null,
       total_amount: totalAmount,
       amount_paid: 0,
       balance_remaining: totalAmount,
-      status: 'ordered',
-      created_by: [req.user.id],
-      created_at: new Date().toISOString()
-    });
+      status: 'ordered'
+    };
+    
+    if (expected_delivery_date) {
+      orderData.expected_delivery_date = expected_delivery_date;
+    }
+    
+    const order = await airtableHelpers.create(TABLES.ORDERS, orderData);
 
     // Create order items
-    const orderItems = await Promise.all(
-      items.map(item => 
-        airtableHelpers.create(TABLES.ORDER_ITEMS, {
-          order_id: [order.id],
-          product_name: item.product_name.trim(),
-          quantity_ordered: parseInt(item.quantity_ordered),
-          purchase_price_per_unit: parseFloat(item.purchase_price_per_unit),
-          quantity_received: 0,
-          branch_destination_id: item.branch_destination_id ? [item.branch_destination_id] : null,
-          created_at: new Date().toISOString()
-        })
-      )
-    );
+    const orderItems = [];
+    for (const item of items) {
+      const orderItem = await airtableHelpers.create(TABLES.ORDER_ITEMS, {
+        order_id: [order.id],
+        product_name: item.product_name,
+        quantity_ordered: Number(item.quantity_ordered),
+        purchase_price_per_unit: Number(item.purchase_price_per_unit),
+        quantity_received: 0
+      });
+      orderItems.push(orderItem);
+    }
 
     res.status(201).json({
       message: 'Order created successfully',

@@ -2,10 +2,7 @@ const express = require('express');
 const { airtableHelpers, TABLES } = require('../config/airtable');
 const { authenticateToken, authorizeRoles, auditLog } = require('../middleware/auth');
 
-// CSRF protection disabled for form submissions
-const csrfProtection = (req, res, next) => {
-  next();
-};
+
 
 const router = express.Router();
 
@@ -54,64 +51,35 @@ router.post('/branch/:branchId', authenticateToken, async (req, res) => {
     const { branchId } = req.params;
     const { items, payment_method } = req.body;
 
-    console.log('Creating sale for branch:', branchId);
-    console.log('Items:', items);
-    console.log('Payment method:', payment_method);
-
     if (!items || items.length === 0) {
       return res.status(400).json({ message: 'Sale items are required' });
     }
 
-    // Calculate total amount
     const totalAmount = items.reduce((sum, item) => {
-      return sum + (item.quantity * item.unit_price);
+      return sum + (Number(item.quantity) * Number(item.unit_price));
     }, 0);
 
-    console.log('Total amount:', totalAmount);
-
-    // Create sale record
     const saleData = {
       total_amount: totalAmount,
       payment_method: payment_method || 'cash',
-      sale_date: new Date().toISOString(),
-      created_at: new Date().toISOString(),
-      recorded_by: [req.user.id]
+      sale_date: new Date().toISOString().split('T')[0]
     };
     
-    // Add branch_id - use first available branch if 'default'
     if (branchId && branchId !== 'default') {
       saleData.branch_id = [branchId];
-    } else {
-      // Get first available branch for 'default'
-      const allBranches = await airtableHelpers.find(TABLES.BRANCHES);
-      if (allBranches.length > 0) {
-        saleData.branch_id = [allBranches[0].id];
-      }
     }
-    
-    // Add customer name if provided (only if field exists)
-    // Note: customer_name field may not exist in Sales table
-    // if (req.body.customer_name) {
-    //   saleData.customer_name = req.body.customer_name;
-    // }
 
-    console.log('Creating sale with data:', saleData);
     const sale = await airtableHelpers.create(TABLES.SALES, saleData);
-    console.log('Sale created:', sale.id);
     
-    // Create sale items
     const saleItems = [];
     for (const item of items) {
-      const saleItemData = {
+      const saleItem = await airtableHelpers.create(TABLES.SALE_ITEMS, {
         sale_id: [sale.id],
-        product_id: item.product_id,
         product_name: item.product_name,
-        quantity: item.quantity,
-        unit_price: item.unit_price,
-        subtotal: item.quantity * item.unit_price
-      };
-      
-      const saleItem = await airtableHelpers.create(TABLES.SALE_ITEMS, saleItemData);
+        quantity_sold: Number(item.quantity),
+        unit_price: Number(item.unit_price),
+        subtotal: Number(item.quantity) * Number(item.unit_price)
+      });
       saleItems.push(saleItem);
     }
 
@@ -139,27 +107,20 @@ router.post('/branch/:branchId', authenticateToken, async (req, res) => {
       
       await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, movementData);
       
-      // Update stock quantity - find by product_id
-      let stockItems;
       if (branchId && branchId !== 'default') {
-        stockItems = allStock.filter(s => 
+        const stockItems = allStock.filter(s => 
           s.branch_id && s.branch_id.includes(branchId) && 
-          s.product_id === item.product_id
+          s.product_name === item.product_name
         );
-      } else {
-        // For default branch, find any stock with matching product_id
-        stockItems = allStock.filter(s => s.product_id === item.product_id);
-      }
-      
-      if (stockItems.length > 0) {
-        const stockItem = stockItems[0];
-        const newQuantity = Math.max(0, stockItem.quantity_available - item.quantity);
-        console.log('Updating stock from', stockItem.quantity_available, 'to', newQuantity);
         
-        await airtableHelpers.update(TABLES.STOCK, stockItem.id, {
-          quantity_available: newQuantity,
-          last_updated: new Date().toISOString()
-        });
+        if (stockItems.length > 0) {
+          const stockItem = stockItems[0];
+          const newQuantity = Math.max(0, stockItem.quantity_available - Number(item.quantity));
+          
+          await airtableHelpers.update(TABLES.STOCK, stockItem.id, {
+            quantity_available: newQuantity
+          });
+        }
       }
     }
 

@@ -16,6 +16,17 @@ const csrfProtection = (req, res, next) => {
 
 const router = express.Router();
 
+// Get all stock items
+router.get('/', async (req, res) => {
+  try {
+    const allStock = await airtableHelpers.find(TABLES.STOCK);
+    res.json(allStock);
+  } catch (error) {
+    console.error('Get all stock error:', error);
+    res.status(500).json({ message: 'Failed to fetch all stock' });
+  }
+});
+
 // Debug route to check all data
 router.get('/debug', async (req, res) => {
   try {
