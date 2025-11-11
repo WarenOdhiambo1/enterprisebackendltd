@@ -83,15 +83,16 @@ router.post('/employees', authenticateToken, authorizeRoles(['admin', 'boss', 'h
       return res.status(400).json({ message: 'Email already exists in the system' });
     }
 
-    // Admin can set custom password or system generates secure one
-    let finalPassword;
-    if (password && password.trim()) {
-      finalPassword = password.trim();
-    } else {
-      // Generate secure random password
-      const crypto = require('crypto');
-      finalPassword = crypto.randomBytes(8).toString('hex') + '!A1';
+    // Require password from user
+    if (!password || !password.trim()) {
+      return res.status(400).json({ message: 'Password is required when creating a new employee' });
     }
+    
+    if (password.trim().length < 8) {
+      return res.status(400).json({ message: 'Password must be at least 8 characters long' });
+    }
+    
+    const finalPassword = password.trim();
     
     const hashedPassword = await bcrypt.hash(finalPassword, 12);
     
@@ -103,8 +104,9 @@ router.post('/employees', authenticateToken, authorizeRoles(['admin', 'boss', 'h
       is_active: true,
       hire_date: hire_date || new Date().toISOString().split('T')[0],
       mfa_enabled: false,
-      password_set_by_admin: !!password,
-      temp_password: !password // Flag if password needs to be changed on first login
+      password_set_by_admin: !!hashedPassword,
+      temp_password: !hashedPassword,
+      account_status: hashedPassword ? 'active' : 'pending_password'
     };
     
     if (phone && phone.trim()) employeeData.phone = phone.trim();
@@ -136,8 +138,7 @@ router.post('/employees', authenticateToken, authorizeRoles(['admin', 'boss', 'h
       is_active: employee.fields.is_active,
       hire_date: employee.fields.hire_date,
       salary: employee.fields.salary || null,
-      phone: employee.fields.phone || null,
-      temp_password: !password ? finalPassword : undefined // Return temp password if generated
+      phone: employee.fields.phone || null
     });
   } catch (error) {
     console.error('Create employee error:', error);
