@@ -24,6 +24,7 @@ const diagnosticsRoutes = require('./routes/diagnostics');
 const authCallbackRoutes = require('./routes/auth-callback');
 const xeroRoutes = require('./routes/xero');
 const expensesRoutes = require('./routes/expenses');
+const financeRoutes = require('./routes/finance');
 const { authenticateToken, authorizeRoles } = require('./middleware/auth');
 
 const app = express();
@@ -236,6 +237,7 @@ app.use('/api/diagnostics', diagnosticsRoutes);
 app.use('/auth', authCallbackRoutes);
 app.use('/api/xero', xeroRoutes);
 app.use('/api/expenses', expensesRoutes);
+app.use('/api/finance', financeRoutes);
 app.use('/api/data', require('./routes/data'));
 
 // Error handling middleware
