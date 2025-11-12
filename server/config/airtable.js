@@ -22,6 +22,9 @@ const TABLES = {
   ORDERS: 'Orders',
   ORDER_ITEMS: 'Order_Items',
   PAYROLL: 'Payroll',
+  INVOICES: 'Invoices',
+  INVOICE_ITEMS: 'Invoice_Items',
+  CHART_OF_ACCOUNTS: 'Chart_of_Accounts',
   AUDIT_LOGS: 'Audit_Logs',
   ERP_SETTINGS: 'ERP_Settings',
   DOCUMENTS: 'Documents'
