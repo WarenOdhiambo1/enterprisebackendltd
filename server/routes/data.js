@@ -117,7 +117,7 @@ router.post('/:tableName', authenticateToken, async (req, res) => {
     const recordData = { ...data };
     
     // Only add audit fields for tables that support them (exclude Orders)
-    const auditTables = [TABLES.EMPLOYEES, TABLES.STOCK, TABLES.SALES, TABLES.EXPENSES];
+    const auditTables = [TABLES.EMPLOYEES, TABLES.STOCK, TABLES.SALES, TABLES.EXPENSES, TABLES.DOCUMENTS];
     if (auditTables.includes(tableName) && tableName !== TABLES.ORDERS) {
       recordData.created_at = new Date().toISOString();
       recordData.updated_at = new Date().toISOString();
@@ -154,7 +154,7 @@ router.put('/:tableName/:recordId', authenticateToken, async (req, res) => {
     const updateData = { ...data };
     
     // Only add audit fields for tables that support them (exclude Orders)
-    const auditTables = [TABLES.EMPLOYEES, TABLES.STOCK, TABLES.SALES, TABLES.EXPENSES];
+    const auditTables = [TABLES.EMPLOYEES, TABLES.STOCK, TABLES.SALES, TABLES.EXPENSES, TABLES.DOCUMENTS];
     if (auditTables.includes(tableName) && tableName !== TABLES.ORDERS) {
       updateData.updated_at = new Date().toISOString();
       updateData.updated_by = req.user.userId;
@@ -223,7 +223,7 @@ router.post('/:tableName/bulk', authenticateToken, authorizeRoles(['boss', 'admi
     switch (operation) {
       case 'create':
         for (const recordData of records) {
-          const auditTables = [TABLES.EMPLOYEES, TABLES.STOCK, TABLES.SALES, TABLES.EXPENSES];
+          const auditTables = [TABLES.EMPLOYEES, TABLES.STOCK, TABLES.SALES, TABLES.EXPENSES, TABLES.DOCUMENTS];
           const dataToCreate = { ...recordData };
           if (auditTables.includes(tableName) && tableName !== TABLES.ORDERS) {
             dataToCreate.created_at = new Date().toISOString();
@@ -236,7 +236,7 @@ router.post('/:tableName/bulk', authenticateToken, authorizeRoles(['boss', 'admi
         
       case 'update':
         for (const { id, data } of records) {
-          const auditTables = [TABLES.EMPLOYEES, TABLES.STOCK, TABLES.SALES, TABLES.EXPENSES];
+          const auditTables = [TABLES.EMPLOYEES, TABLES.STOCK, TABLES.SALES, TABLES.EXPENSES, TABLES.DOCUMENTS];
           const dataToUpdate = { ...data };
           if (auditTables.includes(tableName) && tableName !== TABLES.ORDERS) {
             dataToUpdate.updated_at = new Date().toISOString();

@@ -1,45 +1,36 @@
 const express = require('express');
 const multer = require('multer');
+const { TABLES } = require('../config/airtable');
 const { authenticateToken } = require('../middleware/auth');
-const { base: airtableBase, TABLES } = require('../config/airtable');
-const path = require('path');
-const { google } = require('googleapis');
-const stream = require('stream');
+const { 
+  supportsDocuments, 
+  isValidDocumentField, 
+  validateBusinessDocument,
+  formatAttachmentForAirtable,
+  getSuggestedDocumentFields
+} = require('../utils/document-helper');
 
 const router = express.Router();
-
-// Configure Google Drive API
-let auth;
-try {
-  if (process.env.GOOGLE_CREDENTIALS_BASE64) {
-    // For Vercel deployment - decode base64 credentials
-    const credentials = JSON.parse(Buffer.from(process.env.GOOGLE_CREDENTIALS_BASE64, 'base64').toString());
-    auth = new google.auth.GoogleAuth({
-      credentials,
-      scopes: ['https://www.googleapis.com/auth/drive.file']
-    });
-  } else {
-    // For local development - use file
-    auth = new google.auth.GoogleAuth({
-      keyFile: process.env.GOOGLE_SERVICE_ACCOUNT_KEY || './google-credentials.json',
-      scopes: ['https://www.googleapis.com/auth/drive.file']
-    });
-  }
-} catch (error) {
-  console.error('Google Drive configuration failed:', error.message);
-  auth = null;
-}
-
-const drive = auth ? google.drive({ version: 'v3', auth }) : null;
 
 // Configure multer for file uploads
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+  },
   fileFilter: (req, file, cb) => {
-    const allowedTypes = ['.pdf', '.jpg', '.jpeg', '.png', '.doc', '.docx', '.xls', '.xlsx'];
-    const ext = path.extname(file.originalname).toLowerCase();
-    if (allowedTypes.includes(ext)) {
+    const allowedTypes = [
+      'application/pdf',
+      'image/jpeg',
+      'image/png',
+      'image/jpg',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    ];
+    
+    if (allowedTypes.includes(file.mimetype)) {
       cb(null, true);
     } else {
       cb(new Error('Invalid file type'), false);
@@ -47,147 +38,193 @@ const upload = multer({
   }
 });
 
-// Upload document
-router.post('/upload', authenticateToken, upload.single('document'), async (req, res) => {
+// Upload document to specific table and record
+router.post('/upload/:tableName/:recordId/:fieldName', authenticateToken, upload.single('document'), async (req, res) => {
   try {
-    if (!drive) {
-      return res.status(503).json({ message: 'Document upload service not available' });
-    }
-    
-    const { category, description, tags } = req.body;
+    const { tableName, recordId, fieldName } = req.params;
     const file = req.file;
-
+    
     if (!file) {
       return res.status(400).json({ message: 'No file uploaded' });
     }
 
-    // Upload to Google Drive
-    const fileName = `${Date.now()}-${file.originalname}`;
-    const bufferStream = new stream.PassThrough();
-    bufferStream.end(file.buffer);
+    // Validate table name
+    const validTables = Object.values(TABLES);
+    if (!validTables.includes(tableName)) {
+      return res.status(400).json({ message: 'Invalid table name' });
+    }
 
-    const driveResponse = await drive.files.create({
-      requestBody: {
-        name: fileName,
-        parents: [process.env.GOOGLE_DRIVE_FOLDER_ID || 'root']
-      },
-      media: {
-        mimeType: file.mimetype,
-        body: bufferStream
-      }
+    // Validate document for business use
+    try {
+      validateBusinessDocument(file);
+    } catch (validationError) {
+      return res.status(400).json({ message: validationError.message });
+    }
+
+    // Check if table supports documents and field is valid
+    if (supportsDocuments(tableName) && !isValidDocumentField(tableName, fieldName)) {
+      return res.status(400).json({ 
+        message: `Invalid document field '${fieldName}' for table '${tableName}'`,
+        suggestedFields: getSuggestedDocumentFields(tableName)
+      });
+    }
+
+    const Airtable = require('airtable');
+    const base = Airtable.base(process.env.AIRTABLE_BASE_ID);
+
+    // Create attachment object for Airtable
+    const attachment = formatAttachmentForAirtable(file, {
+      uploadedBy: req.user.userId,
+      uploadedAt: new Date().toISOString()
     });
 
-    // Make file accessible
-    await drive.permissions.create({
-      fileId: driveResponse.data.id,
-      requestBody: {
-        role: 'reader',
-        type: 'anyone'
-      }
-    });
+    // Get existing record to preserve other attachments
+    const existingRecord = await base(tableName).find(recordId);
+    const existingAttachments = existingRecord.fields[fieldName] || [];
 
-    // Save to Airtable
-    const documentRecord = await airtableBase(TABLES.DOCUMENTS || 'Documents').create([{
-      fields: {
-        file_name: file.originalname,
-        display_name: req.body.display_name || file.originalname,
-        file_size: file.size,
-        file_type: file.mimetype,
-        category: category || 'general',
-        subcategory: req.body.subcategory || '',
-        description: description || '',
-        tags: tags || '',
-        google_drive_id: driveResponse.data.id,
-        google_drive_url: `https://drive.google.com/file/d/${driveResponse.data.id}/view`,
-        uploaded_by: [req.user.id],
-        uploaded_at: new Date().toISOString(),
-        branch_id: req.user.branchId ? [req.user.branchId] : null,
-        is_public: req.body.is_public === 'true' || false,
-        is_archived: false,
-        version: 1.0,
-        approval_status: 'pending',
-        access_count: 0
-      }
-    }]);
+    // Add new attachment to existing ones
+    const updatedAttachments = [...existingAttachments, attachment];
+
+    // Update record with new attachment
+    const updatedRecord = await base(tableName).update(recordId, {
+      [fieldName]: updatedAttachments
+    });
 
     res.json({
-      id: documentRecord[0].id,
-      fileName: file.originalname,
-      category,
-      description,
-      uploadedAt: new Date().toISOString()
+      message: 'Document uploaded successfully',
+      attachment: {
+        id: updatedRecord.fields[fieldName][updatedRecord.fields[fieldName].length - 1].id,
+        filename: file.originalname,
+        url: updatedRecord.fields[fieldName][updatedRecord.fields[fieldName].length - 1].url
+      }
     });
 
   } catch (error) {
     console.error('Document upload error:', error);
-    res.status(500).json({ message: 'Failed to upload document', error: error.message });
+    res.status(500).json({ message: 'Upload failed', error: error.message });
   }
 });
 
-// Get documents
+// Upload to Documents table
+router.post('/upload', authenticateToken, upload.single('document'), async (req, res) => {
+  try {
+    const file = req.file;
+    const { category, description, tags, subcategory, display_name, is_public } = req.body;
+    
+    if (!file) {
+      return res.status(400).json({ message: 'No file uploaded' });
+    }
+
+    const Airtable = require('airtable');
+    const base = Airtable.base(process.env.AIRTABLE_BASE_ID);
+
+    // Create document record with attachment
+    const documentRecord = await base(TABLES.DOCUMENTS).create({
+      file_name: display_name || file.originalname,
+      category: category || 'general',
+      subcategory: subcategory || '',
+      description: description || '',
+      tags: tags || '',
+      file_size: file.size,
+      file_type: file.mimetype,
+      uploaded_at: new Date().toISOString(),
+      uploaded_by: req.user.userId,
+      is_public: is_public === 'true' || is_public === true,
+      attachments: [{
+        filename: file.originalname,
+        content: file.buffer
+      }]
+    });
+
+    res.json({
+      message: 'Document uploaded successfully',
+      document: {
+        id: documentRecord.id,
+        filename: file.originalname,
+        url: documentRecord.fields.attachments[0].url
+      }
+    });
+
+  } catch (error) {
+    console.error('Document upload error:', error);
+    res.status(500).json({ message: 'Upload failed', error: error.message });
+  }
+});
+
+// Get document download URL
+router.get('/download/:tableName/:recordId/:fieldName/:attachmentId', authenticateToken, async (req, res) => {
+  try {
+    const { tableName, recordId, fieldName, attachmentId } = req.params;
+
+    const Airtable = require('airtable');
+    const base = Airtable.base(process.env.AIRTABLE_BASE_ID);
+
+    const record = await base(tableName).find(recordId);
+    const attachments = record.fields[fieldName] || [];
+    
+    const attachment = attachments.find(att => att.id === attachmentId);
+    
+    if (!attachment) {
+      return res.status(404).json({ message: 'Attachment not found' });
+    }
+
+    res.json({
+      url: attachment.url,
+      filename: attachment.filename
+    });
+
+  } catch (error) {
+    console.error('Document download error:', error);
+    res.status(500).json({ message: 'Download failed', error: error.message });
+  }
+});
+
+// Get all documents with filtering
 router.get('/', authenticateToken, async (req, res) => {
   try {
-    const { category, search } = req.query;
+    const { category, search, limit } = req.query;
     
-    let filter = '';
+    let filterFormula = '';
+    const filters = [];
+    
     if (category && category !== 'all') {
-      filter = `{category} = '${category}'`;
+      filters.push(`{category} = '${category}'`);
     }
-    if (search) {
-      const searchFilter = `OR(FIND('${search}', {file_name}), FIND('${search}', {description}), FIND('${search}', {tags}))`;
-      filter = filter ? `AND(${filter}, ${searchFilter})` : searchFilter;
-    }
-
-    // Branch filtering for non-boss users
-    if (req.user.role !== 'boss' && req.user.branchId) {
-      const branchFilter = `{branch_id} = '${req.user.branchId}'`;
-      filter = filter ? `AND(${filter}, ${branchFilter})` : branchFilter;
-    }
-
-    const documents = await airtableBase(TABLES.DOCUMENTS || 'Documents').select({
-      filterByFormula: filter || 'TRUE()',
-      sort: [{ field: 'uploaded_at', direction: 'desc' }]
-    }).firstPage();
-
-    const documentList = documents.map(record => ({
-      id: record.id,
-      fileName: record.fields.file_name,
-      fileSize: record.fields.file_size,
-      fileType: record.fields.file_type,
-      category: record.fields.category,
-      description: record.fields.description,
-      tags: record.fields.tags,
-      uploadedAt: record.fields.uploaded_at,
-      uploadedBy: record.fields.uploaded_by
-    }));
-
-    res.json(documentList);
-  } catch (error) {
-    res.status(500).json({ message: 'Failed to fetch documents', error: error.message });
-  }
-});
-
-// Download document
-router.get('/download/:documentId', authenticateToken, async (req, res) => {
-  try {
-    const { documentId } = req.params;
     
-    const document = await airtableBase(TABLES.DOCUMENTS || 'Documents').find(documentId);
-    if (!document) {
-      return res.status(404).json({ message: 'Document not found' });
+    if (search) {
+      filters.push(`OR(
+        FIND(LOWER('${search}'), LOWER({file_name})) > 0,
+        FIND(LOWER('${search}'), LOWER({description})) > 0,
+        FIND(LOWER('${search}'), LOWER({tags})) > 0
+      )`);
     }
-
-    // Get Google Drive download URL
-    const driveFile = await drive.files.get({
-      fileId: document.fields.google_drive_id,
-      alt: 'media'
-    }, { responseType: 'stream' });
-
-    res.setHeader('Content-Disposition', `attachment; filename="${document.fields.file_name}"`);
-    res.setHeader('Content-Type', document.fields.file_type);
-    driveFile.data.pipe(res);
+    
+    if (filters.length > 0) {
+      filterFormula = filters.length === 1 ? filters[0] : `AND(${filters.join(', ')})`;
+    }
+    
+    const Airtable = require('airtable');
+    const base = Airtable.base(process.env.AIRTABLE_BASE_ID);
+    
+    const records = await base(TABLES.DOCUMENTS)
+      .select({
+        filterByFormula: filterFormula || undefined,
+        sort: [{ field: 'uploaded_at', direction: 'desc' }],
+        maxRecords: limit ? parseInt(limit) : undefined
+      })
+      .all();
+    
+    const documents = records.map(record => ({
+      id: record.id,
+      ...record.fields,
+      // Ensure attachments are properly formatted
+      attachments: record.fields.attachments || []
+    }));
+    
+    res.json(documents);
   } catch (error) {
-    res.status(500).json({ message: 'Failed to generate download link', error: error.message });
+    console.error('Get documents error:', error);
+    res.status(500).json({ message: 'Failed to fetch documents', error: error.message });
   }
 });
 
@@ -196,22 +233,96 @@ router.delete('/:documentId', authenticateToken, async (req, res) => {
   try {
     const { documentId } = req.params;
     
-    const document = await airtableBase(TABLES.DOCUMENTS || 'Documents').find(documentId);
-    if (!document) {
-      return res.status(404).json({ message: 'Document not found' });
-    }
-
-    // Delete from Google Drive
-    await drive.files.delete({
-      fileId: document.fields.google_drive_id
-    });
-
-    // Delete from Airtable
-    await airtableBase(TABLES.DOCUMENTS || 'Documents').destroy([documentId]);
-
+    const Airtable = require('airtable');
+    const base = Airtable.base(process.env.AIRTABLE_BASE_ID);
+    
+    await base(TABLES.DOCUMENTS).destroy(documentId);
+    
     res.json({ message: 'Document deleted successfully' });
   } catch (error) {
-    res.status(500).json({ message: 'Failed to delete document', error: error.message });
+    console.error('Delete document error:', error);
+    res.status(500).json({ message: 'Delete failed', error: error.message });
+  }
+});
+
+// Get document capabilities for tables
+router.get('/capabilities', authenticateToken, async (req, res) => {
+  try {
+    const { getDocumentEnabledTables, getDocumentFields, getSuggestedDocumentFields } = require('../utils/document-helper');
+    
+    const capabilities = {};
+    const enabledTables = getDocumentEnabledTables();
+    
+    enabledTables.forEach(tableName => {
+      const fields = getDocumentFields(tableName);
+      const suggestions = getSuggestedDocumentFields(tableName);
+      
+      capabilities[tableName] = {
+        tableName,
+        fields: fields.fields,
+        description: fields.description,
+        suggestedFields: suggestions
+      };
+    });
+    
+    res.json({
+      documentEnabledTables: enabledTables,
+      capabilities,
+      totalTables: enabledTables.length
+    });
+  } catch (error) {
+    console.error('Get capabilities error:', error);
+    res.status(500).json({ message: 'Failed to get document capabilities', error: error.message });
+  }
+});
+
+// Get documents for a specific table and record
+router.get('/table/:tableName/:recordId', authenticateToken, async (req, res) => {
+  try {
+    const { tableName, recordId } = req.params;
+    
+    // Validate table name
+    const validTables = Object.values(TABLES);
+    if (!validTables.includes(tableName)) {
+      return res.status(400).json({ message: 'Invalid table name' });
+    }
+    
+    const Airtable = require('airtable');
+    const base = Airtable.base(process.env.AIRTABLE_BASE_ID);
+    
+    const record = await base(tableName).find(recordId);
+    
+    // Extract all attachment fields
+    const documentFields = {};
+    const { getDocumentFields } = require('../utils/document-helper');
+    const tableConfig = getDocumentFields(tableName);
+    
+    if (tableConfig) {
+      tableConfig.fields.forEach(fieldName => {
+        if (record.fields[fieldName]) {
+          documentFields[fieldName] = record.fields[fieldName];
+        }
+      });
+    }
+    
+    // Also check for any other attachment fields
+    Object.keys(record.fields).forEach(fieldName => {
+      if (Array.isArray(record.fields[fieldName]) && 
+          record.fields[fieldName].length > 0 && 
+          record.fields[fieldName][0].url) {
+        documentFields[fieldName] = record.fields[fieldName];
+      }
+    });
+    
+    res.json({
+      recordId,
+      tableName,
+      documentFields,
+      totalAttachments: Object.values(documentFields).reduce((sum, field) => sum + (field?.length || 0), 0)
+    });
+  } catch (error) {
+    console.error('Get table documents error:', error);
+    res.status(500).json({ message: 'Failed to get table documents', error: error.message });
   }
 });
 
