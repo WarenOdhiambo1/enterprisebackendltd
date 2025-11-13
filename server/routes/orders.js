@@ -357,7 +357,8 @@ router.post('/:orderId/complete', authenticateToken, authorizeRoles(['admin', 'm
             const newQuantity = stockItem.quantity_available + item.quantityOrdered;
             await airtableHelpers.update(TABLES.STOCK, stockItem.id, {
               quantity_available: newQuantity,
-              unit_price: item.purchasePrice
+              unit_price: item.purchasePrice,
+              last_updated: new Date().toISOString()
             });
           } else {
             // Create new stock entry
@@ -367,18 +368,23 @@ router.post('/:orderId/complete', authenticateToken, authorizeRoles(['admin', 'm
               product_name: item.productName,
               quantity_available: item.quantityOrdered,
               reorder_level: 10,
-              unit_price: item.purchasePrice
+              unit_price: item.purchasePrice,
+              last_updated: new Date().toISOString(),
+              created_at: new Date().toISOString()
             });
           }
 
           // Create stock movement record
           await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, {
+            to_branch_id: [item.branchDestinationId],
+            product_id: item.productId || `PRD_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
             product_name: item.productName,
             quantity: item.quantityOrdered,
             movement_type: 'purchase',
-            movement_date: new Date().toISOString().split('T')[0],
-            reference_id: orderId,
-            to_branch_id: [item.branchDestinationId]
+            reason: 'Stock added from completed order',
+            status: 'completed',
+            created_by: [req.user.id],
+            created_at: new Date().toISOString()
           });
         }
       }
@@ -410,7 +416,8 @@ router.post('/:orderId/complete', authenticateToken, authorizeRoles(['admin', 'm
             const newQuantity = stockItem.quantity_available + item.quantityOrdered;
             await airtableHelpers.update(TABLES.STOCK, stockItem.id, {
               quantity_available: newQuantity,
-              unit_price: item.purchasePrice
+              unit_price: item.purchasePrice,
+              last_updated: new Date().toISOString()
             });
           } else {
             // Create new stock entry
@@ -420,18 +427,23 @@ router.post('/:orderId/complete', authenticateToken, authorizeRoles(['admin', 'm
               product_name: item.productName,
               quantity_available: item.quantityOrdered,
               reorder_level: 10,
-              unit_price: item.purchasePrice
+              unit_price: item.purchasePrice,
+              last_updated: new Date().toISOString(),
+              created_at: new Date().toISOString()
             });
           }
 
           // Create stock movement record
           await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, {
+            to_branch_id: [item.branchDestinationId],
+            product_id: item.productId || `PRD_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
             product_name: item.productName,
             quantity: item.quantityOrdered,
             movement_type: 'purchase',
-            movement_date: new Date().toISOString().split('T')[0],
-            reference_id: orderId,
-            to_branch_id: [item.branchDestinationId]
+            reason: 'Stock added from completed order',
+            status: 'completed',
+            created_by: [req.user.id],
+            created_at: new Date().toISOString()
           });
         }
       }
