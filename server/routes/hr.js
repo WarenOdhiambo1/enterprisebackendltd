@@ -484,8 +484,6 @@ router.post('/payroll/send-payslips', authenticateToken, authorizeRoles(['hr', '
       return res.status(400).json({ message: 'Payroll IDs are required' });
     }
 
-    const whatsappService = require('../utils/whatsapp');
-    const payslipGenerator = require('../utils/payslip-generator');
     const results = [];
 
     console.log(`Processing ${payroll_ids.length} payslips for WhatsApp sending`);
@@ -534,20 +532,16 @@ router.post('/payroll/send-payslips', authenticateToken, authorizeRoles(['hr', '
         console.log(`Sending payslip to ${employee.full_name} at ${employee.phone}`);
 
         // Send via WhatsApp
-        const whatsappResult = await whatsappService.sendPayslip(
           employee.phone,
           employee.full_name,
           payslipBuffer,
           fileName
         );
 
-        if (whatsappResult.success) {
           // Update payroll record
           await airtableHelpers.update(TABLES.PAYROLL, payrollId, {
             payslip_sent: true,
             payslip_sent_date: new Date().toISOString(),
-            whatsapp_message_id: whatsappResult.messageId,
-            whatsapp_phone: whatsappResult.phone
           });
           
           results.push({ 
@@ -561,7 +555,6 @@ router.post('/payroll/send-payslips', authenticateToken, authorizeRoles(['hr', '
           results.push({ 
             payrollId, 
             status: 'error', 
-            message: `WhatsApp failed for ${employee.full_name}: ${whatsappResult.error}`,
             employee_name: employee.full_name,
             phone: employee.phone
           });
@@ -659,7 +652,6 @@ router.post('/payroll/generate-advanced', authenticateToken, authorizeRoles(['hr
         net_salary: netSalary.toString(),
         payment_status: 'pending',
         payslip_sent: false,
-        whatsapp_ready: employee.phone && employee.phone.trim() !== '',
         created_at: new Date().toISOString()
       };
 
@@ -731,7 +723,6 @@ router.get('/payroll/:payrollId/payslip', authenticateToken, authorizeRoles(['hr
       return res.status(404).json({ message: 'Employee not found' });
     }
 
-    const payslipGenerator = require('../utils/payslip-generator');
     const payslipBuffer = await payslipGenerator.generatePayslip(employee, payroll);
     
     res.setHeader('Content-Type', 'application/pdf');

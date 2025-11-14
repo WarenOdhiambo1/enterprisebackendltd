@@ -5,7 +5,7 @@ const speakeasy = require('speakeasy');
 const QRCode = require('qrcode');
 // const { body, validationResult } = require('express-validator');
 const { airtableHelpers, TABLES } = require('../config/airtable');
-const Encryption = require('../utils/encryption');
+
 
 // CSRF protection middleware (configurable)
 const csrfProtection = (req, res, next) => {
