@@ -138,7 +138,7 @@ router.post('/:tableName', authenticateToken, async (req, res) => {
     });
     
     // Only add audit fields for tables that support them
-    const auditTables = [TABLES.EMPLOYEES, TABLES.STOCK, TABLES.SALES, TABLES.EXPENSES];
+    const auditTables = [TABLES.EMPLOYEES, TABLES.SALES, TABLES.EXPENSES];
     if (auditTables.includes(tableName)) {
       recordData.created_at = new Date().toISOString();
       if (req.user?.id) {
