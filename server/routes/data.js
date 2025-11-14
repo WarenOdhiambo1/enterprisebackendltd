@@ -114,14 +114,22 @@ router.post('/:tableName', authenticateToken, async (req, res) => {
     const { tableName } = req.params;
     const data = req.body;
     
+    console.log(`Creating ${tableName} with data:`, JSON.stringify(data, null, 2));
+    console.log('User:', req.user);
+    
     // Validate table name
     const validTables = Object.values(TABLES);
     if (!validTables.includes(tableName)) {
       return res.status(400).json({ message: 'Invalid table name' });
     }
 
-    // Add audit fields only if they exist in the table
-    const recordData = { ...data };
+    // Clean data - remove undefined values
+    const recordData = {};
+    Object.keys(data).forEach(key => {
+      if (data[key] !== undefined && data[key] !== null) {
+        recordData[key] = data[key];
+      }
+    });
     
     // Only add audit fields for tables that support them (exclude Orders)
     const auditTables = [TABLES.EMPLOYEES, TABLES.STOCK, TABLES.SALES, TABLES.EXPENSES, TABLES.DOCUMENTS];
@@ -139,10 +147,16 @@ router.post('/:tableName', authenticateToken, async (req, res) => {
       recordData.branch_id = [req.user.branchId];
     }
 
+    console.log(`Final record data for ${tableName}:`, JSON.stringify(recordData, null, 2));
     const record = await directAirtableHelpers.create(tableName, recordData);
     res.status(201).json(record);
   } catch (error) {
-    console.error(`Error creating ${req.params.tableName}:`, error);
+    console.error(`Error creating ${req.params.tableName}:`, {
+      message: error.message,
+      stack: error.stack,
+      data: req.body,
+      user: req.user
+    });
     res.status(500).json({ message: 'Failed to create record', error: error.message });
   }
 });
