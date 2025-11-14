@@ -453,14 +453,24 @@ router.post('/:orderId/complete', authenticateToken, authorizeRoles(['admin', 'm
       });
     }
 
-    // Mark order as completed
-    await airtableHelpers.update(TABLES.ORDERS, orderId, {
-      status: 'completed'
-    });
+    // Mark order as completed and update payment status if needed
+    const orderUpdate = {
+      status: 'completed',
+      completed_at: new Date().toISOString()
+    };
+    
+    // If order is not fully paid, mark as paid when completed
+    if (order.balance_remaining > 0) {
+      orderUpdate.amount_paid = order.total_amount;
+      orderUpdate.balance_remaining = 0;
+    }
+    
+    await airtableHelpers.update(TABLES.ORDERS, orderId, orderUpdate);
 
     res.json({ 
       success: true,
-      message: 'Order completed successfully and stock added to branches' 
+      message: 'Order completed successfully and stock added to branches',
+      order_status: 'completed'
     });
   } catch (error) {
     console.error('Complete order error:', error);
