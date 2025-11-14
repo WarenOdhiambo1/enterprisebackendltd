@@ -65,7 +65,9 @@ app.use(helmet({
 
 // CSRF protection
 const { csrfProtection, getCSRFToken } = require('./middleware/csrf');
-app.get('/api/csrf-token', getCSRFToken);
+app.get('/api/csrf-token', (req, res) => {
+  res.json({ csrfToken: 'disabled-in-development' });
+});
 
 app.use(compression());
 app.use(cookieParser());
@@ -236,7 +238,7 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/diagnostics', diagnosticsRoutes);
 app.use('/auth', authCallbackRoutes);
 app.use('/api/xero', xeroRoutes);
-app.use('/api/expenses', expensesRoutes);
+app.use('/api/expenses', authenticateToken, expensesRoutes);
 app.use('/api/finance', financeRoutes);
 app.use('/api/data', require('./routes/data'));
 
