@@ -56,7 +56,13 @@ app.get('/', (req, res) => {
   res.json({ 
     status: 'OK', 
     message: 'BSN Manager Backend API is running',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    version: '2.0.0-cleaned',
+    routes: {
+      stock: 'mounted',
+      sales: 'mounted',
+      expenses: 'mounted'
+    }
   });
 });
 
@@ -71,6 +77,15 @@ app.get('/api/test', (req, res) => {
 app.get('/api/stock-test', (req, res) => {
   res.json({ 
     message: 'Stock route is accessible',
+    timestamp: new Date().toISOString(),
+    status: 'success'
+  });
+});
+
+// Test stock route without auth
+app.get('/api/stock/test', (req, res) => {
+  res.json({ 
+    message: 'Stock routes are working',
     timestamp: new Date().toISOString(),
     status: 'success'
   });
