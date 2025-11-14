@@ -103,7 +103,7 @@ router.get('/branch/:branchId', authenticateToken, async (req, res) => {
   }
 });
 
-// Add new stock item (generic route)
+// Add new stock item (generic route) - Updated
 router.post('/', authenticateToken, async (req, res) => {
   try {
     const { branchId, product_name, product_id, quantity_available, unit_price, reorder_level, branch_id } = req.body;
