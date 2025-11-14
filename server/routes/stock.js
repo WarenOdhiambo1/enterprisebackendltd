@@ -103,7 +103,47 @@ router.get('/branch/:branchId', authenticateToken, async (req, res) => {
   }
 });
 
-// Add new stock item
+// Add new stock item (generic route)
+router.post('/', authenticateToken, async (req, res) => {
+  try {
+    const { branchId, product_name, product_id, quantity_available, unit_price, reorder_level, branch_id } = req.body;
+    const targetBranchId = branchId || (Array.isArray(branch_id) ? branch_id[0] : branch_id);
+
+    console.log('Stock creation request:', { targetBranchId, body: req.body });
+
+    if (!product_name || !quantity_available || !unit_price) {
+      return res.status(400).json({ message: 'Product name, quantity, and unit price are required' });
+    }
+
+    if (!targetBranchId) {
+      return res.status(400).json({ message: 'Branch ID is required' });
+    }
+
+    const stockData = {
+      branch_id: [targetBranchId],
+      product_id: product_id || `PRD_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+      product_name,
+      quantity_available: parseInt(quantity_available),
+      unit_price: parseFloat(unit_price),
+      reorder_level: parseInt(reorder_level) || 10,
+      last_updated: new Date().toISOString()
+    };
+
+    console.log('Creating stock with data:', stockData);
+    const newStock = await airtableHelpers.create(TABLES.STOCK, stockData);
+    console.log('Stock created successfully:', newStock.id);
+    res.status(201).json(newStock);
+  } catch (error) {
+    console.error('Add stock error details:', {
+      message: error.message,
+      stack: error.stack,
+      body: req.body
+    });
+    res.status(500).json({ message: 'Failed to add stock', error: error.message });
+  }
+});
+
+// Add new stock item (branch-specific route)
 router.post('/branch/:branchId', authenticateToken, async (req, res) => {
   try {
     const { branchId } = req.params;

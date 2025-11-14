@@ -269,7 +269,6 @@ router.post('/:orderId/delivery', authenticateToken, authorizeRoles(['admin', 'm
             order_id: [orderId],
             status: 'completed',
             created_by: [req.user.id],
-            created_at: new Date().toISOString()
           });
         }
       })
@@ -370,7 +369,6 @@ router.post('/:orderId/complete', authenticateToken, authorizeRoles(['admin', 'm
               reorder_level: 10,
               unit_price: item.purchasePrice,
               last_updated: new Date().toISOString(),
-              created_at: new Date().toISOString()
             });
           }
 
@@ -384,7 +382,6 @@ router.post('/:orderId/complete', authenticateToken, authorizeRoles(['admin', 'm
             reason: 'Stock added from completed order',
             status: 'completed',
             created_by: [req.user.id],
-            created_at: new Date().toISOString()
           });
         }
       }
@@ -429,7 +426,6 @@ router.post('/:orderId/complete', authenticateToken, authorizeRoles(['admin', 'm
               reorder_level: 10,
               unit_price: item.purchasePrice,
               last_updated: new Date().toISOString(),
-              created_at: new Date().toISOString()
             });
           }
 
@@ -443,7 +439,6 @@ router.post('/:orderId/complete', authenticateToken, authorizeRoles(['admin', 'm
             reason: 'Stock added from completed order',
             status: 'completed',
             created_by: [req.user.id],
-            created_at: new Date().toISOString()
           });
         }
       }
