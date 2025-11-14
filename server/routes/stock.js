@@ -36,7 +36,7 @@ router.post('/test-create', async (req, res) => {
 });
 
 // Get all stock items
-router.get('/', async (req, res) => {
+router.get('/', authenticateToken, async (req, res) => {
   try {
     const allStock = await airtableHelpers.find(TABLES.STOCK);
     res.json(allStock);
@@ -81,7 +81,7 @@ router.get('/debug', async (req, res) => {
 });
 
 // Get stock for a branch
-router.get('/branch/:branchId', async (req, res) => {
+router.get('/branch/:branchId', authenticateToken, async (req, res) => {
   try {
     const { branchId } = req.params;
     console.log('Fetching stock for branchId:', branchId);
@@ -104,7 +104,7 @@ router.get('/branch/:branchId', async (req, res) => {
 });
 
 // Add new stock item
-router.post('/branch/:branchId', async (req, res) => {
+router.post('/branch/:branchId', authenticateToken, async (req, res) => {
   try {
     const { branchId } = req.params;
     const { product_name, product_id, quantity_available, unit_price, reorder_level } = req.body;
@@ -142,7 +142,7 @@ router.post('/branch/:branchId', async (req, res) => {
 });
 
 // Update stock item details
-router.put('/:stockId', async (req, res) => {
+router.put('/:stockId', authenticateToken, async (req, res) => {
   try {
     const { stockId } = req.params;
     const { product_name, product_id, quantity_available, unit_price, reorder_level } = req.body;

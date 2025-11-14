@@ -67,7 +67,11 @@ router.get('/:tableName', authenticateToken, async (req, res) => {
     // Validate table name
     const validTables = Object.values(TABLES);
     if (!validTables.includes(tableName)) {
-      return res.status(400).json({ message: 'Invalid table name' });
+      return res.status(400).json({ 
+        message: 'Invalid table name', 
+        requested: tableName,
+        available: validTables 
+      });
     }
 
     // Apply branch filtering for non-boss users
@@ -97,6 +101,9 @@ router.get('/:tableName', authenticateToken, async (req, res) => {
     res.json(limitedRecords);
   } catch (error) {
     console.error(`Error fetching ${req.params.tableName}:`, error);
+    if (error.message.includes('NOT_FOUND') || error.message.includes('Table')) {
+      return res.status(404).json({ message: `Table ${req.params.tableName} not found in database` });
+    }
     res.status(500).json({ message: 'Failed to fetch data', error: error.message });
   }
 });
