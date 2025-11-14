@@ -76,18 +76,32 @@ app.get('/api/stock-test', (req, res) => {
   });
 });
 
+console.log('Mounting routes...');
 app.use('/api/auth', authRoutes);
+console.log('Auth routes mounted');
 app.use('/api/branches', branchRoutes);
+console.log('Branches routes mounted');
 app.use('/api/expenses', authenticateToken, expensesRoutes);
+console.log('Expenses routes mounted');
 app.use('/api/stock', authenticateToken, stockRoutes);
+console.log('Stock routes mounted');
 app.use('/api/sales', authenticateToken, salesRoutes);
+console.log('Sales routes mounted');
 app.use('/api/logistics', authenticateToken, logisticsRoutes);
+console.log('Logistics routes mounted');
 app.use('/api/orders', authenticateToken, ordersRoutes);
+console.log('Orders routes mounted');
 app.use('/api/hr', authenticateToken, hrRoutes);
+console.log('HR routes mounted');
 app.use('/api/boss', authenticateToken, authorizeRoles(['boss', 'manager', 'admin']), bossRoutes);
+console.log('Boss routes mounted');
 app.use('/api/manager', authenticateToken, managerRoutes);
+console.log('Manager routes mounted');
 app.use('/api/admin', authenticateToken, adminRoutes);
+console.log('Admin routes mounted');
 app.use('/api/data', authenticateToken, dataRoutes);
+console.log('Data routes mounted');
+console.log('All routes mounted successfully');
 
 app.use((err, req, res, next) => {
   res.status(500).json({ 
@@ -97,7 +111,13 @@ app.use((err, req, res, next) => {
 });
 
 app.use('*', (req, res) => {
-  res.status(404).json({ message: 'Route not found' });
+  console.log('404 - Route not found:', req.method, req.originalUrl);
+  res.status(404).json({ 
+    message: 'Route not found',
+    method: req.method,
+    url: req.originalUrl,
+    timestamp: new Date().toISOString()
+  });
 });
 
 const PORT = process.env.PORT || 5000;
