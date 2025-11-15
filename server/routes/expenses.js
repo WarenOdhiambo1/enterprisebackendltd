@@ -26,9 +26,7 @@ router.post('/', async (req, res) => {
       category,
       amount: parseFloat(amount),
       description: description || '',
-      expense_date: expense_date || new Date().toISOString().split('T')[0],
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
+      expense_date: expense_date || new Date().toISOString().split('T')[0]
     };
 
     // Add optional fields if provided
