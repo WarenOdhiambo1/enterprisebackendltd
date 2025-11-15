@@ -91,57 +91,7 @@ app.get('/api/stock/test', (req, res) => {
   });
 });
 
-// Direct stock routes as fallback
-app.get('/api/stock/health', (req, res) => {
-  res.json({ 
-    message: 'Stock routes are working',
-    timestamp: new Date().toISOString(),
-    status: 'success'
-  });
-});
 
-app.get('/api/stock', authenticateToken, async (req, res) => {
-  try {
-    const { airtableHelpers, TABLES } = require('./config/airtable');
-    const allStock = await airtableHelpers.find(TABLES.STOCK);
-    res.json(allStock);
-  } catch (error) {
-    console.error('Get all stock error:', error);
-    res.status(500).json({ message: 'Failed to fetch all stock' });
-  }
-});
-
-app.post('/api/stock', authenticateToken, async (req, res) => {
-  try {
-    const { airtableHelpers, TABLES } = require('./config/airtable');
-    const { branchId, product_name, product_id, quantity_available, unit_price, reorder_level, branch_id } = req.body;
-    const targetBranchId = branchId || (Array.isArray(branch_id) ? branch_id[0] : branch_id);
-
-    if (!product_name || !quantity_available || !unit_price) {
-      return res.status(400).json({ message: 'Product name, quantity, and unit price are required' });
-    }
-
-    if (!targetBranchId) {
-      return res.status(400).json({ message: 'Branch ID is required' });
-    }
-
-    const stockData = {
-      branch_id: [targetBranchId],
-      product_id: product_id || `PRD_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-      product_name: product_name.trim(),
-      quantity_available: parseInt(quantity_available),
-      unit_price: parseFloat(unit_price),
-      reorder_level: parseInt(reorder_level) || 10,
-      last_updated: new Date().toISOString()
-    };
-
-    const newStock = await airtableHelpers.create(TABLES.STOCK, stockData);
-    res.status(201).json(newStock);
-  } catch (error) {
-    console.error('Add stock error:', error);
-    res.status(500).json({ message: 'Failed to add stock', error: error.message });
-  }
-});
 
 console.log('Mounting routes...');
 app.use('/api/auth', authRoutes);
@@ -150,8 +100,8 @@ app.use('/api/branches', branchRoutes);
 console.log('Branches routes mounted');
 app.use('/api/expenses', authenticateToken, expensesRoutes);
 console.log('Expenses routes mounted');
-// app.use('/api/stock', authenticateToken, stockRoutes);
-console.log('Stock routes mounted directly');
+app.use('/api/stock', authenticateToken, stockRoutes);
+console.log('Stock routes mounted');
 app.use('/api/sales', authenticateToken, salesRoutes);
 console.log('Sales routes mounted');
 app.use('/api/logistics', authenticateToken, logisticsRoutes);
