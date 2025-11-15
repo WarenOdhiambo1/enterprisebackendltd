@@ -20,7 +20,23 @@ router.get('/branch/:branchId', async (req, res) => {
     const branchSales = allSales.filter(sale => 
       sale.branch_id && sale.branch_id.includes(branchId)
     );
-    res.json(branchSales);
+    
+    // Get sale items for each sale
+    const salesWithItems = await Promise.all(
+      branchSales.map(async (sale) => {
+        try {
+          const saleItems = await airtableHelpers.find(
+            TABLES.SALE_ITEMS,
+            `{sale_id} = "${sale.id}"`
+          );
+          return { ...sale, items: saleItems };
+        } catch (error) {
+          return { ...sale, items: [] };
+        }
+      })
+    );
+    
+    res.json(salesWithItems);
   } catch (error) {
     console.error('Get branch sales error:', error);
     res.status(500).json({ message: 'Failed to fetch branch sales' });
@@ -33,31 +49,43 @@ router.post('/', async (req, res) => {
 
     // Handle new format with items array
     if (items && items.length > 0 && branchId) {
-      const results = [];
+      // Calculate total amount for the sale
+      const saleTotal = items.reduce((sum, item) => {
+        return sum + (parseInt(item.quantity) * parseFloat(item.unit_price));
+      }, 0);
       
+      // Create the main sale record
+      const salesData = {
+        branch_id: [branchId],
+        total_amount: saleTotal,
+        customer_name: customer_name || '',
+        payment_method: payment_method || 'cash',
+        sale_date: sale_date || new Date().toISOString().split('T')[0],
+        employee_id: employee_id ? [employee_id] : []
+      };
+      
+      const newSale = await airtableHelpers.create(TABLES.SALES, salesData);
+      
+      // Create sale items
+      const saleItems = [];
       for (const item of items) {
         if (!item.quantity || !item.unit_price) {
           continue;
         }
         
-        const salesData = {
-          branch_id: [branchId],
-          quantity_sold: parseInt(item.quantity),
+        const saleItemData = {
+          sale_id: [newSale.id],
+          product_name: item.product_name || '',
+          quantity: parseInt(item.quantity),
           unit_price: parseFloat(item.unit_price),
-          total_amount: parseInt(item.quantity) * parseFloat(item.unit_price),
-          customer_name: customer_name || '',
-          payment_method: payment_method || 'cash',
-          sale_date: sale_date || new Date().toISOString().split('T')[0],
-          employee_id: employee_id ? [employee_id] : [],
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
+          total_price: parseInt(item.quantity) * parseFloat(item.unit_price)
         };
         
-        const newSale = await airtableHelpers.create(TABLES.SALES, salesData);
-        results.push(newSale);
+        const saleItem = await airtableHelpers.create(TABLES.SALE_ITEMS, saleItemData);
+        saleItems.push(saleItem);
       }
       
-      return res.status(201).json(results);
+      return res.status(201).json({ sale: newSale, items: saleItems });
     }
     
     // Handle old format
@@ -67,13 +95,9 @@ router.post('/', async (req, res) => {
 
     const salesData = {
       branch_id: Array.isArray(branch_id) ? branch_id : [branch_id],
-      quantity_sold: parseInt(quantity_sold),
-      unit_price: parseFloat(unit_price),
       total_amount: parseFloat(total_amount) || (parseInt(quantity_sold) * parseFloat(unit_price)),
       customer_name: customer_name || '',
-      sale_date: sale_date || new Date().toISOString().split('T')[0],
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
+      sale_date: sale_date || new Date().toISOString().split('T')[0]
     };
 
     const newSale = await airtableHelpers.create(TABLES.SALES, salesData);
