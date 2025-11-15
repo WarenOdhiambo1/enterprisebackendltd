@@ -42,7 +42,6 @@ router.post('/', async (req, res) => {
         
         const salesData = {
           branch_id: [branchId],
-          product_name: item.product_name,
           quantity_sold: parseInt(item.quantity),
           unit_price: parseFloat(item.unit_price),
           total_amount: parseInt(item.quantity) * parseFloat(item.unit_price),
