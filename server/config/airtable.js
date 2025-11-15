@@ -22,7 +22,18 @@ const TABLES = {
   ORDERS: 'Orders',
   ORDER_ITEMS: 'Order_Items',
   PAYROLL: 'Payroll',
-  CONTACTS: 'Contacts'
+  CONTACTS: 'Contacts',
+  // New Zoho-style tables for enhanced inventory management
+  PURCHASE_RECEIVES: 'Purchase_Receives',
+  RECEIVE_ITEMS: 'Receive_Items',
+  BILLS: 'Bills',
+  BILL_ITEMS: 'Bill_Items',
+  PAYMENTS_MADE: 'Payments_Made',
+  VENDOR_CREDITS: 'Vendor_Credits',
+  INVENTORY_ADJUSTMENTS: 'Inventory_Adjustments',
+  ADJUSTMENT_ITEMS: 'Adjustment_Items',
+  PACKAGES: 'Packages',
+  PACKAGE_ITEMS: 'Package_Items'
 };
 
 // Field mappings for relationships

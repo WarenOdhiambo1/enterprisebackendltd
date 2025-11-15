@@ -14,6 +14,9 @@ const managerRoutes = require('./routes/manager');
 const adminRoutes = require('./routes/admin');
 const expensesRoutes = require('./routes/expenses');
 const dataRoutes = require('./routes/data');
+const purchaseReceivesRoutes = require('./routes/purchase-receives');
+const billsRoutes = require('./routes/bills');
+const inventoryAdjustmentsRoutes = require('./routes/inventory-adjustments');
 const { authenticateToken, authorizeRoles } = require('./middleware/auth');
 
 const app = express();
@@ -118,6 +121,12 @@ app.use('/api/admin', authenticateToken, adminRoutes);
 console.log('Admin routes mounted');
 app.use('/api/data', authenticateToken, dataRoutes);
 console.log('Data routes mounted');
+app.use('/api/purchase-receives', authenticateToken, purchaseReceivesRoutes);
+console.log('Purchase receives routes mounted');
+app.use('/api/bills', authenticateToken, billsRoutes);
+console.log('Bills routes mounted');
+app.use('/api/inventory-adjustments', authenticateToken, inventoryAdjustmentsRoutes);
+console.log('Inventory adjustments routes mounted');
 console.log('All routes mounted successfully');
 
 app.use((err, req, res, next) => {
