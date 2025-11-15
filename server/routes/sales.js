@@ -13,6 +13,20 @@ router.get('/', async (req, res) => {
   }
 });
 
+router.get('/branch/:branchId', async (req, res) => {
+  try {
+    const { branchId } = req.params;
+    const allSales = await airtableHelpers.find(TABLES.SALES);
+    const branchSales = allSales.filter(sale => 
+      sale.branch_id && sale.branch_id.includes(branchId)
+    );
+    res.json(branchSales);
+  } catch (error) {
+    console.error('Get branch sales error:', error);
+    res.status(500).json({ message: 'Failed to fetch branch sales' });
+  }
+});
+
 router.post('/', async (req, res) => {
   try {
     const { branch_id, product_id, quantity_sold, unit_price, total_amount, customer_name, sale_date } = req.body;
