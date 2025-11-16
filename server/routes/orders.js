@@ -38,8 +38,15 @@ router.get('/', authenticateToken, authorizeRoles(['admin', 'manager', 'boss']),
     const ordersWithItems = await Promise.all(
       orders.map(async (order) => {
         const [items, receives, bills, payments] = await Promise.all([
-          // Order items
-          airtableHelpers.find(TABLES.ORDER_ITEMS, `{order_id} = "${order.id}"`).catch(() => []),
+          // Order items - try multiple approaches
+          airtableHelpers.find(TABLES.ORDER_ITEMS).then(allItems => 
+            allItems.filter(item => 
+              item.order_id && (
+                (Array.isArray(item.order_id) && item.order_id.includes(order.id)) ||
+                item.order_id === order.id
+              )
+            )
+          ).catch(() => []),
           // Purchase receives
           airtableHelpers.find(TABLES.PURCHASE_RECEIVES, `{purchase_order_id} = "${order.id}"`).catch(() => []),
           // Bills
@@ -400,6 +407,10 @@ router.post('/:orderId/complete', authenticateToken, authorizeRoles(['admin', 'm
       return res.status(404).json({ message: 'Order not found' });
     }
 
+    if (order.status === 'completed') {
+      return res.status(400).json({ message: 'Order is already completed' });
+    }
+
     const allStock = await airtableHelpers.find(TABLES.STOCK);
     
     for (const item of completedItems) {
@@ -436,29 +447,16 @@ router.post('/:orderId/complete', authenticateToken, authorizeRoles(['admin', 'm
           unit_price: purchasePrice
         });
       }
-
-      // Create stock movement
-      await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, {
-        to_branch_id: [item.branchDestinationId],
-        product_name: item.productName,
-        quantity: quantityOrdered,
-        movement_type: 'purchase_order',
-        reason: `Stock added from completed order #${orderId}`,
-        status: 'completed'
-      });
     }
 
     // Mark order as completed
     await airtableHelpers.update(TABLES.ORDERS, orderId, {
-      status: 'completed',
-      amount_paid: order.total_amount,
-      balance_remaining: 0
+      status: 'completed'
     });
 
     res.json({ 
       success: true,
-      message: 'Order completed successfully!',
-      order_status: 'completed'
+      message: 'Order completed successfully!'
     });
   } catch (error) {
     console.error('Complete order error:', error);
