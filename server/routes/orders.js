@@ -91,44 +91,27 @@ router.get('/debug/:orderId', authenticateToken, authorizeRoles(['admin', 'manag
 });
 
 // Create order with complete workflow (Phase 1: Order Creation)
-router.post('/', authenticateToken, authorizeRoles(['admin', 'manager', 'boss']), auditLog('CREATE_ORDER'), async (req, res) => {
+router.post('/', authenticateToken, authorizeRoles(['admin', 'manager', 'boss']), async (req, res) => {
   try {
-    const {
-      supplier_name,
-      order_date,
-      expected_delivery_date,
-      items
-    } = req.body;
+    const { supplier_name, order_date, expected_delivery_date, items } = req.body;
 
     if (!supplier_name || !order_date || !items || items.length === 0) {
       return res.status(400).json({ message: 'Supplier name, order date, and items are required' });
     }
 
-    // Basic validation
-    for (const item of items) {
-      if (!item.product_name || !item.quantity_ordered || !item.purchase_price_per_unit) {
-        return res.status(400).json({ 
-          message: 'Each item must have product name, quantity, and purchase price' 
-        });
-      }
-    }
-
     // Calculate total amount
     const totalAmount = items.reduce((sum, item) => {
-      return sum + (item.quantity_ordered * item.purchase_price_per_unit);
+      return sum + (Number(item.quantity_ordered) * Number(item.purchase_price_per_unit));
     }, 0);
 
-    // Create order with complete workflow fields
+    // Create order only
     const orderData = {
       supplier_name,
       order_date,
-      expected_delivery_date,
       total_amount: totalAmount,
       amount_paid: 0,
       balance_remaining: totalAmount,
       status: 'ordered',
-      approval_status: 'draft',
-      created_by: req.user?.id ? [req.user.id] : [],
       created_at: new Date().toISOString()
     };
     
@@ -138,54 +121,15 @@ router.post('/', authenticateToken, authorizeRoles(['admin', 'manager', 'boss'])
     
     const order = await airtableHelpers.create(TABLES.ORDERS, orderData);
 
-    // Create order items in ORDER_ITEMS table
-    const orderItems = [];
-    for (const item of items) {
-      try {
-        const orderItemData = {
-          order_id: [order.id],
-          product_name: item.product_name,
-          quantity_ordered: Number(item.quantity_ordered),
-          purchase_price_per_unit: Number(item.purchase_price_per_unit),
-          quantity_received: 0
-        };
-        
-        // Only add branch_destination_id if it exists
-        if (item.branch_destination_id) {
-          orderItemData.branch_destination_id = [item.branch_destination_id];
-        }
-        
-        const orderItem = await airtableHelpers.create(TABLES.ORDER_ITEMS, orderItemData);
-        orderItems.push(orderItem);
-      } catch (itemError) {
-        console.log('Failed to create order item:', itemError.message);
-        // Continue with other items even if one fails
-      }
-    }
-
     res.status(201).json({
       message: 'Order created successfully',
-      order: { 
-        ...order, 
-        items: orderItems,
-        itemsCreated: orderItems.length,
-        totalItems: items.length
-      }
+      order
     });
   } catch (error) {
     console.error('Create order error:', error);
-    console.error('Error details:', error.message);
-    console.error('Error stack:', error.stack);
-    
-    // Check if response was already sent
-    if (res.headersSent) {
-      console.log('Response already sent, cannot send error response');
-      return;
-    }
-    
     res.status(500).json({ 
       message: 'Failed to create order', 
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+      error: error.message
     });
   }
 });
