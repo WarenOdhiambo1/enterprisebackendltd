@@ -66,6 +66,17 @@ router.get('/', authenticateToken, authorizeRoles(['admin', 'manager', 'boss']),
   }
 });
 
+// Get all order items
+router.get('/items', authenticateToken, authorizeRoles(['admin', 'manager', 'boss']), async (req, res) => {
+  try {
+    const orderItems = await airtableHelpers.find(TABLES.ORDER_ITEMS);
+    res.json(orderItems);
+  } catch (error) {
+    console.error('Get order items error:', error);
+    res.status(500).json({ message: 'Failed to fetch order items' });
+  }
+});
+
 // Debug endpoint to check order items
 router.get('/debug/:orderId', authenticateToken, authorizeRoles(['admin', 'manager', 'boss']), async (req, res) => {
   try {
