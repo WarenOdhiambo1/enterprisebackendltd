@@ -134,11 +134,19 @@ router.post('/transfer', async (req, res) => {
     // Convert old format to new format
     let transferData;
     if (product_id && to_branch_id && from_branch_id && quantity) {
-      // Find product name from stock
-      const stockItems = await airtableHelpers.find(
+      // Find product by name or ID
+      let stockItems = await airtableHelpers.find(
         TABLES.STOCK,
-        `AND({branch_id} = "${from_branch_id}", {product_id} = "${product_id}")`
+        `AND({branch_id} = "${from_branch_id}", {product_name} = "${product_id}")`
       );
+      
+      if (stockItems.length === 0) {
+        stockItems = await airtableHelpers.find(
+          TABLES.STOCK,
+          `AND({branch_id} = "${from_branch_id}", {product_id} = "${product_id}")`
+        );
+      }
+      
       const productName = stockItems.length > 0 ? stockItems[0].product_name : product_id;
       
       transferData = {
@@ -165,10 +173,17 @@ router.post('/transfer', async (req, res) => {
       }
       
       // Check if source branch has enough stock
-      const sourceStock = await airtableHelpers.find(
+      let sourceStock = await airtableHelpers.find(
         TABLES.STOCK,
-        `AND({branch_id} = "${fromBranchId}", {product_id} = "${item.productId}")`
+        `AND({branch_id} = "${transferData.fromBranchId}", {product_name} = "${item.productId}")`
       );
+      
+      if (sourceStock.length === 0) {
+        sourceStock = await airtableHelpers.find(
+          TABLES.STOCK,
+          `AND({branch_id} = "${transferData.fromBranchId}", {product_id} = "${item.productId}")`
+        );
+      }
       
       if (sourceStock.length === 0) {
         return res.status(400).json({ 
