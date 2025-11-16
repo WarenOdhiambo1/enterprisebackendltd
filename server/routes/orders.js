@@ -111,8 +111,7 @@ router.post('/', authenticateToken, authorizeRoles(['admin', 'manager', 'boss'])
       total_amount: totalAmount,
       amount_paid: 0,
       balance_remaining: totalAmount,
-      status: 'ordered',
-      created_at: new Date().toISOString()
+      status: 'ordered'
     };
     
     if (expected_delivery_date) {
