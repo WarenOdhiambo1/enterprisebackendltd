@@ -59,67 +59,81 @@ router.post('/', async (req, res) => {
       return sum + (parseInt(item.quantity) * parseFloat(item.unit_price));
     }, 0);
     
-    // Create main sale record with minimal fields
+    // Create main sale record with complete fields
     const salesData = {
       branch_id: [branchId],
+      customer_name: customer_name || 'Walk-in Customer',
+      payment_method: payment_method || 'cash',
       total_amount: saleTotal,
-      sale_date: sale_date || new Date().toISOString().split('T')[0]
+      sale_date: sale_date || new Date().toISOString().split('T')[0],
+      status: 'completed'
     };
     
+    if (employee_id) {
+      salesData.employee_id = [employee_id];
+    }
+    
     const newSale = await airtableHelpers.create(TABLES.SALES, salesData);
+    
+    // Get all stock once for efficiency
+    const allStock = await airtableHelpers.find(TABLES.STOCK);
     
     // Process each item: create sale item and reduce stock
     const saleItems = [];
     for (const item of items) {
-      if (!item.quantity || !item.unit_price) continue;
+      if (!item.quantity || !item.unit_price || !item.product_name) continue;
       
-      // Create sale item
+      const quantity = parseInt(item.quantity);
+      const unitPrice = parseFloat(item.unit_price);
+      
+      // Create sale item with complete data
       const saleItemData = {
         sale_id: [newSale.id],
-        product_name: item.product_name || '',
-        quantity: parseInt(item.quantity),
-        unit_price: parseFloat(item.unit_price)
+        product_name: item.product_name,
+        quantity: quantity,
+        unit_price: unitPrice,
+        total_price: quantity * unitPrice
       };
       
       try {
         const saleItem = await airtableHelpers.create(TABLES.SALE_ITEMS, saleItemData);
         saleItems.push(saleItem);
         
-        // Create stock movement for sale (auto-approved)
-        const saleMovement = await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, {
-          movement_type: 'sale',
-          from_branch_id: [branchId],
-          product_name: item.product_name,
-          quantity: parseInt(item.quantity),
-          unit_cost: parseFloat(item.unit_price),
-          total_cost: parseInt(item.quantity) * parseFloat(item.unit_price),
-          reason: `Sale to ${customer_name || 'customer'}`,
-          status: 'approved',
-          requested_by: employee_id ? [employee_id] : [],
-          approved_by: employee_id ? [employee_id] : [],
-          created_at: new Date().toISOString(),
-          approved_at: new Date().toISOString()
-        });
-        
-        // Reduce stock automatically for sales
-        const allStock = await airtableHelpers.find(TABLES.STOCK);
+        // Find and reduce stock
         const stockItem = allStock.find(s => 
-          s.branch_id && s.branch_id.includes(branchId) && s.product_name === item.product_name
+          s.branch_id && s.branch_id.includes(branchId) && 
+          s.product_name && s.product_name.toLowerCase().trim() === item.product_name.toLowerCase().trim()
         );
         
-        if (stockItem) {
-          const newQuantity = Math.max(0, stockItem.quantity_available - parseInt(item.quantity));
+        if (stockItem && stockItem.quantity_available >= quantity) {
+          const newQuantity = stockItem.quantity_available - quantity;
           await airtableHelpers.update(TABLES.STOCK, stockItem.id, {
-            quantity_available: newQuantity,
-            last_updated: new Date().toISOString()
+            quantity_available: newQuantity
           });
+          
+          // Create stock movement record
+          await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, {
+            movement_type: 'sale',
+            from_branch_id: [branchId],
+            product_name: item.product_name,
+            quantity: quantity,
+            reason: `Sale to ${customer_name || 'customer'}`,
+            status: 'completed'
+          });
+        } else {
+          console.log(`Insufficient stock for ${item.product_name}`);
         }
       } catch (itemError) {
-        console.error('Sale item/stock error:', itemError);
+        console.error('Sale item error:', itemError);
       }
     }
     
-    res.status(201).json({ sale: newSale, items: saleItems });
+    res.status(201).json({ 
+      success: true,
+      sale: newSale, 
+      items: saleItems,
+      message: 'Sale created successfully'
+    });
   } catch (error) {
     console.error('Add sale error:', error);
     res.status(500).json({ message: 'Failed to add sale', error: error.message });
