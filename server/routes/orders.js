@@ -454,8 +454,7 @@ router.post('/:orderId/complete', authenticateToken, authorizeRoles(['admin', 'm
         status: 'completed',
         transfer_date: new Date().toISOString(),
         unit_cost: purchasePrice,
-        total_cost: quantityOrdered * purchasePrice,
-        created_at: new Date().toISOString()
+        total_cost: quantityOrdered * purchasePrice
       };
       
       const movementResult = await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, movementData);
@@ -501,9 +500,7 @@ router.post('/:orderId/complete', authenticateToken, authorizeRoles(['admin', 'm
 
     // Mark order as completed
     const orderUpdate = {
-      status: 'completed',
-      completed_at: new Date().toISOString(),
-      total_transfers: transferReceipts.length
+      status: 'completed'
     };
     
     // Auto-pay order when completed
