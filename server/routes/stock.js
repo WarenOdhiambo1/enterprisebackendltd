@@ -125,113 +125,48 @@ router.get('/movements/:branchId', async (req, res) => {
   }
 });
 
-// Multi-product transfer endpoint
+// Simple transfer endpoint
 router.post('/transfer', async (req, res) => {
   try {
-    // Handle both old and new format
-    const { fromBranchId, toBranchId, items, reason, requestedBy, product_id, to_branch_id, from_branch_id, quantity } = req.body;
+    const { product_id, to_branch_id, from_branch_id, quantity, reason } = req.body;
     
-    // Convert old format to new format
-    let transferData;
-    if (product_id && to_branch_id && from_branch_id && quantity) {
-      // Find product by name or ID
-      let stockItems = await airtableHelpers.find(
-        TABLES.STOCK,
-        `AND({branch_id} = "${from_branch_id}", {product_name} = "${product_id}")`
-      );
-      
-      if (stockItems.length === 0) {
-        stockItems = await airtableHelpers.find(
-          TABLES.STOCK,
-          `AND({branch_id} = "${from_branch_id}", {product_id} = "${product_id}")`
-        );
-      }
-      
-      const productName = stockItems.length > 0 ? stockItems[0].product_name : product_id;
-      
-      transferData = {
-        fromBranchId: from_branch_id,
-        toBranchId: to_branch_id,
-        items: [{ productId: product_id, productName: productName, quantity: parseInt(quantity) }],
-        reason: reason || 'Stock transfer'
-      };
-    } else {
-      transferData = { fromBranchId, toBranchId, items, reason, requestedBy };
+    if (!product_id || !to_branch_id || !from_branch_id || !quantity) {
+      return res.status(400).json({ message: 'Product ID, from branch, to branch, and quantity are required' });
     }
     
-    if (!transferData.fromBranchId || !transferData.toBranchId || !transferData.items || transferData.items.length === 0) {
-      return res.status(400).json({ message: 'From branch, to branch, and items are required' });
+    // Find product in source branch
+    const allStock = await airtableHelpers.find(TABLES.STOCK);
+    const sourceStock = allStock.find(item => 
+      item.branch_id && item.branch_id.includes(from_branch_id) && 
+      (item.product_name === product_id || item.product_id === product_id)
+    );
+    
+    if (!sourceStock) {
+      return res.status(400).json({ message: `Product ${product_id} not found in source branch` });
     }
     
-    const transferId = `TRF_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const transferResults = [];
-    
-    // Process each item in the transfer
-    for (const item of transferData.items) {
-      if (!item.productId || !item.quantity || item.quantity <= 0) {
-        continue;
-      }
-      
-      // Check if source branch has enough stock
-      let sourceStock = await airtableHelpers.find(
-        TABLES.STOCK,
-        `AND({branch_id} = "${transferData.fromBranchId}", {product_name} = "${item.productId}")`
-      );
-      
-      if (sourceStock.length === 0) {
-        sourceStock = await airtableHelpers.find(
-          TABLES.STOCK,
-          `AND({branch_id} = "${transferData.fromBranchId}", {product_id} = "${item.productId}")`
-        );
-      }
-      
-      if (sourceStock.length === 0) {
-        return res.status(400).json({ 
-          message: `Product ${item.productId} not found in source branch` 
-        });
-      }
-      
-      if (sourceStock[0].quantity_available < item.quantity) {
-        return res.status(400).json({ 
-          message: `Insufficient stock for ${item.productId}. Available: ${sourceStock[0].quantity_available}, Requested: ${item.quantity}` 
-        });
-      }
-      
-      // Create transfer movement record
-      const movement = await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, {
-        transfer_id: transferId,
-        from_branch_id: [transferData.fromBranchId],
-        to_branch_id: [transferData.toBranchId],
-        product_id: item.productId,
-        product_name: item.productName || sourceStock[0].product_name,
-        quantity: item.quantity,
-        movement_type: 'transfer',
-        reason: transferData.reason || 'Branch transfer',
-        status: 'pending',
-        transfer_date: new Date().toISOString(),
-        created_by: req.user?.id ? [req.user.id] : [],
-        requested_by: transferData.requestedBy || req.user?.fullName || 'System',
-        unit_cost: sourceStock[0].unit_price,
-        total_cost: item.quantity * sourceStock[0].unit_price
-      });
-      
-      transferResults.push({
-        movementId: movement.id,
-        productName: item.productName || sourceStock[0].product_name,
-        quantity: item.quantity,
-        status: 'pending'
+    if (sourceStock.quantity_available < parseInt(quantity)) {
+      return res.status(400).json({ 
+        message: `Insufficient stock. Available: ${sourceStock.quantity_available}, Requested: ${quantity}` 
       });
     }
     
-    res.json({
-      success: true,
-      transferId,
-      message: `Transfer initiated with ${transferResults.length} items`,
-      items: transferResults
+    // Create simple movement record
+    const movement = await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, {
+      from_branch_id: [from_branch_id],
+      to_branch_id: [to_branch_id],
+      product_name: sourceStock.product_name,
+      quantity: parseInt(quantity),
+      movement_type: 'transfer',
+      transfer_date: new Date().toISOString(),
+      reason: reason || 'Stock transfer',
+      status: 'pending'
     });
+    
+    res.json({ success: true, movement });
   } catch (error) {
     console.error('Transfer stock error:', error);
-    res.status(500).json({ message: 'Failed to initiate transfer' });
+    res.status(500).json({ message: 'Failed to initiate transfer', error: error.message });
   }
 });
 
