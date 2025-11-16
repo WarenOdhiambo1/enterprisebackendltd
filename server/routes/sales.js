@@ -85,29 +85,33 @@ router.post('/', async (req, res) => {
         const saleItem = await airtableHelpers.create(TABLES.SALE_ITEMS, saleItemData);
         saleItems.push(saleItem);
         
-        // Reduce stock quantity
-        const stockItems = await airtableHelpers.find(
-          TABLES.STOCK,
-          `AND({branch_id} = "${branchId}", {product_name} = "${item.product_name}")`
+        // Create stock movement for sale (auto-approved)
+        const saleMovement = await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, {
+          movement_type: 'sale',
+          from_branch_id: [branchId],
+          product_name: item.product_name,
+          quantity: parseInt(item.quantity),
+          unit_cost: parseFloat(item.unit_price),
+          total_cost: parseInt(item.quantity) * parseFloat(item.unit_price),
+          reason: `Sale to ${customer_name || 'customer'}`,
+          status: 'approved',
+          requested_by: employee_id ? [employee_id] : [],
+          approved_by: employee_id ? [employee_id] : [],
+          created_at: new Date().toISOString(),
+          approved_at: new Date().toISOString()
+        });
+        
+        // Reduce stock automatically for sales
+        const allStock = await airtableHelpers.find(TABLES.STOCK);
+        const stockItem = allStock.find(s => 
+          s.branch_id && s.branch_id.includes(branchId) && s.product_name === item.product_name
         );
         
-        if (stockItems.length > 0) {
-          const stockItem = stockItems[0];
+        if (stockItem) {
           const newQuantity = Math.max(0, stockItem.quantity_available - parseInt(item.quantity));
-          
           await airtableHelpers.update(TABLES.STOCK, stockItem.id, {
             quantity_available: newQuantity,
             last_updated: new Date().toISOString()
-          });
-          
-          // Create stock movement record
-          await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, {
-            from_branch_id: [branchId],
-            product_name: item.product_name,
-            quantity: parseInt(item.quantity),
-            movement_type: 'sale',
-            transfer_date: new Date().toISOString(),
-            reason: `Sale to ${customer_name || 'customer'}`
           });
         }
       } catch (itemError) {

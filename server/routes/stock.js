@@ -125,48 +125,202 @@ router.get('/movements/:branchId', async (req, res) => {
   }
 });
 
-// Simple transfer endpoint
+// Stock Movement System - Comprehensive Architecture
+
+// Create movement (all types: new_stock, transfer_out, transfer_in, sale)
+router.post('/movement', async (req, res) => {
+  try {
+    const { 
+      movement_type, 
+      product_name, 
+      quantity, 
+      from_branch_id, 
+      to_branch_id, 
+      unit_cost, 
+      reason,
+      package_id,
+      adjustment_id 
+    } = req.body;
+    
+    const movementData = {
+      movement_type,
+      product_name,
+      quantity: parseInt(quantity),
+      unit_cost: parseFloat(unit_cost) || 0,
+      total_cost: parseInt(quantity) * (parseFloat(unit_cost) || 0),
+      reason: reason || '',
+      status: 'pending',
+      requested_by: req.user?.id ? [req.user.id] : [],
+      created_at: new Date().toISOString()
+    };
+    
+    // Add branch fields based on movement type
+    if (from_branch_id) movementData.from_branch_id = [from_branch_id];
+    if (to_branch_id) movementData.to_branch_id = [to_branch_id];
+    if (package_id) movementData.package_id = [package_id];
+    if (adjustment_id) movementData.adjustment_id = [adjustment_id];
+    
+    const movement = await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, movementData);
+    res.json({ success: true, movement });
+  } catch (error) {
+    console.error('Create movement error:', error);
+    res.status(500).json({ message: 'Failed to create movement', error: error.message });
+  }
+});
+
+// Transfer endpoint (backward compatibility)
 router.post('/transfer', async (req, res) => {
   try {
     const { product_id, to_branch_id, from_branch_id, quantity, reason } = req.body;
     
-    if (!product_id || !to_branch_id || !from_branch_id || !quantity) {
-      return res.status(400).json({ message: 'Product ID, from branch, to branch, and quantity are required' });
-    }
-    
-    // Find product in source branch
-    const allStock = await airtableHelpers.find(TABLES.STOCK);
-    const sourceStock = allStock.find(item => 
-      item.branch_id && item.branch_id.includes(from_branch_id) && 
-      (item.product_name === product_id || item.product_id === product_id)
-    );
-    
-    if (!sourceStock) {
-      return res.status(400).json({ message: `Product ${product_id} not found in source branch` });
-    }
-    
-    if (sourceStock.quantity_available < parseInt(quantity)) {
-      return res.status(400).json({ 
-        message: `Insufficient stock. Available: ${sourceStock.quantity_available}, Requested: ${quantity}` 
-      });
-    }
-    
-    // Create simple movement record
     const movement = await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, {
+      movement_type: 'transfer_out',
       from_branch_id: [from_branch_id],
       to_branch_id: [to_branch_id],
-      product_name: sourceStock.product_name,
+      product_name: product_id,
       quantity: parseInt(quantity),
-      movement_type: 'transfer',
-      transfer_date: new Date().toISOString(),
       reason: reason || 'Stock transfer',
-      status: 'pending'
+      status: 'pending',
+      requested_by: req.user?.id ? [req.user.id] : [],
+      created_at: new Date().toISOString()
     });
     
     res.json({ success: true, movement });
   } catch (error) {
-    console.error('Transfer stock error:', error);
-    res.status(500).json({ message: 'Failed to initiate transfer', error: error.message });
+    console.error('Transfer error:', error);
+    res.status(500).json({ message: 'Failed to create transfer', error: error.message });
+  }
+});
+
+// Approve movement
+router.put('/movement/:movementId/approve', async (req, res) => {
+  try {
+    const { movementId } = req.params;
+    
+    const movement = await airtableHelpers.findById(TABLES.STOCK_MOVEMENTS, movementId);
+    if (!movement) {
+      return res.status(404).json({ message: 'Movement not found' });
+    }
+    
+    // Update movement status
+    await airtableHelpers.update(TABLES.STOCK_MOVEMENTS, movementId, {
+      status: 'approved',
+      approved_by: req.user?.id ? [req.user.id] : [],
+      approved_at: new Date().toISOString()
+    });
+    
+    // Execute stock changes based on movement type
+    await executeStockMovement(movement);
+    
+    res.json({ success: true, message: 'Movement approved and executed' });
+  } catch (error) {
+    console.error('Approve movement error:', error);
+    res.status(500).json({ message: 'Failed to approve movement', error: error.message });
+  }
+});
+
+// Reject movement
+router.put('/movement/:movementId/reject', async (req, res) => {
+  try {
+    const { movementId } = req.params;
+    const { rejection_reason } = req.body;
+    
+    await airtableHelpers.update(TABLES.STOCK_MOVEMENTS, movementId, {
+      status: 'rejected',
+      approved_by: req.user?.id ? [req.user.id] : [],
+      approved_at: new Date().toISOString(),
+      rejection_reason: rejection_reason || 'No reason provided'
+    });
+    
+    res.json({ success: true, message: 'Movement rejected' });
+  } catch (error) {
+    console.error('Reject movement error:', error);
+    res.status(500).json({ message: 'Failed to reject movement', error: error.message });
+  }
+});
+
+// Helper function to execute stock changes
+async function executeStockMovement(movement) {
+  const { movement_type, product_name, quantity, from_branch_id, to_branch_id, unit_cost } = movement;
+  
+  switch (movement_type) {
+    case 'new_stock':
+      if (to_branch_id && to_branch_id[0]) {
+        await addStockToBranch(to_branch_id[0], product_name, quantity, unit_cost);
+      }
+      break;
+      
+    case 'transfer_out':
+      if (from_branch_id && from_branch_id[0]) {
+        await reduceStockFromBranch(from_branch_id[0], product_name, quantity);
+      }
+      if (to_branch_id && to_branch_id[0]) {
+        await addStockToBranch(to_branch_id[0], product_name, quantity, unit_cost);
+      }
+      break;
+      
+    case 'sale':
+      if (from_branch_id && from_branch_id[0]) {
+        await reduceStockFromBranch(from_branch_id[0], product_name, quantity);
+      }
+      break;
+  }
+}
+
+// Helper functions for stock operations
+async function addStockToBranch(branchId, productName, quantity, unitCost) {
+  const allStock = await airtableHelpers.find(TABLES.STOCK);
+  const existingStock = allStock.find(item => 
+    item.branch_id && item.branch_id.includes(branchId) && item.product_name === productName
+  );
+  
+  if (existingStock) {
+    await airtableHelpers.update(TABLES.STOCK, existingStock.id, {
+      quantity_available: existingStock.quantity_available + quantity,
+      last_updated: new Date().toISOString()
+    });
+  } else {
+    await airtableHelpers.create(TABLES.STOCK, {
+      branch_id: [branchId],
+      product_name: productName,
+      quantity_available: quantity,
+      unit_price: unitCost || 0,
+      reorder_level: 10,
+      last_updated: new Date().toISOString()
+    });
+  }
+}
+
+async function reduceStockFromBranch(branchId, productName, quantity) {
+  const allStock = await airtableHelpers.find(TABLES.STOCK);
+  const existingStock = allStock.find(item => 
+    item.branch_id && item.branch_id.includes(branchId) && item.product_name === productName
+  );
+  
+  if (existingStock) {
+    const newQuantity = Math.max(0, existingStock.quantity_available - quantity);
+    await airtableHelpers.update(TABLES.STOCK, existingStock.id, {
+      quantity_available: newQuantity,
+      last_updated: new Date().toISOString()
+    });
+  }
+}
+
+// Get pending movements for approval
+router.get('/movements/pending/:branchId', async (req, res) => {
+  try {
+    const { branchId } = req.params;
+    
+    let filterFormula = '{status} = "pending"';
+    if (branchId !== 'all') {
+      filterFormula = `AND(${filterFormula}, OR({from_branch_id} = "${branchId}", {to_branch_id} = "${branchId}"))`;
+    }
+    
+    const pendingMovements = await airtableHelpers.find(TABLES.STOCK_MOVEMENTS, filterFormula);
+    res.json(pendingMovements);
+  } catch (error) {
+    console.error('Get pending movements error:', error);
+    res.status(500).json({ message: 'Failed to fetch pending movements' });
   }
 });
 
