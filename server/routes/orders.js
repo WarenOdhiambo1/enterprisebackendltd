@@ -401,6 +401,8 @@ router.post('/:orderId/complete', authenticateToken, authorizeRoles(['admin', 'm
     const { orderId } = req.params;
     const { completedItems } = req.body;
 
+    console.log('Complete order request:', { orderId, completedItems });
+
     if (!completedItems || !Array.isArray(completedItems) || completedItems.length === 0) {
       return res.status(400).json({ message: 'Completed items are required' });
     }
@@ -415,11 +417,23 @@ router.post('/:orderId/complete', authenticateToken, authorizeRoles(['admin', 'm
     const allStock = await airtableHelpers.find(TABLES.STOCK);
     const transferReceipts = [];
     const processedItems = [];
-    const userId = req.user?.id || 'system';
 
     // Process each completed item
     for (const item of completedItems) {
+      console.log('Processing item:', item);
+      
+      // Validate required fields
       if (!item.branchDestinationId || !item.quantityOrdered || item.quantityOrdered <= 0) {
+        console.log('Skipping item due to missing data:', item);
+        continue;
+      }
+      
+      // Ensure numeric values are properly converted
+      const quantityOrdered = Number(item.quantityOrdered) || 0;
+      const purchasePrice = Number(item.purchasePrice) || 0;
+      
+      if (quantityOrdered <= 0 || purchasePrice < 0) {
+        console.log('Skipping item due to invalid numeric values:', { quantityOrdered, purchasePrice });
         continue;
       }
 
@@ -437,27 +451,29 @@ router.post('/:orderId/complete', authenticateToken, authorizeRoles(['admin', 'm
 
       if (existingProduct) {
         // Update existing product - add quantity
-        const newQuantity = (existingProduct.quantity_available || 0) + item.quantityOrdered;
+        const newQuantity = (existingProduct.quantity_available || 0) + quantityOrdered;
         const updateData = {
           quantity_available: newQuantity,
-          unit_price: item.purchasePrice,
+          unit_price: purchasePrice,
           last_updated: new Date().toISOString()
         };
         
         stockResult = await airtableHelpers.update(TABLES.STOCK, existingProduct.id, updateData);
+        console.log('Updated existing stock:', stockResult.id);
       } else {
         // Create new product entry
         const stockData = {
           branch_id: [item.branchDestinationId],
           product_id: productId,
           product_name: item.productName,
-          quantity_available: item.quantityOrdered,
+          quantity_available: quantityOrdered,
           reorder_level: 10,
-          unit_price: item.purchasePrice,
+          unit_price: purchasePrice,
           last_updated: new Date().toISOString()
         };
         
         stockResult = await airtableHelpers.create(TABLES.STOCK, stockData);
+        console.log('Created new stock:', stockResult.id);
       }
 
       // Create stock movement record for tracking
@@ -465,26 +481,27 @@ router.post('/:orderId/complete', authenticateToken, authorizeRoles(['admin', 'm
         transfer_id: transferId,
         to_branch_id: [item.branchDestinationId],
         product_name: item.productName,
-        quantity: item.quantityOrdered,
+        quantity: quantityOrdered,
         movement_type: 'purchase_order',
         reason: `Stock added from completed order #${orderId}`,
         status: 'completed',
         transfer_date: new Date().toISOString(),
-        unit_cost: item.purchasePrice,
-        total_cost: item.quantityOrdered * item.purchasePrice,
+        unit_cost: purchasePrice,
+        total_cost: quantityOrdered * purchasePrice,
         created_at: new Date().toISOString()
       };
       
       const movementResult = await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, movementData);
+      console.log('Created stock movement:', movementResult.id);
 
       // Generate transfer receipt data
       const receipt = {
         transferId,
         orderId,
         productName: item.productName,
-        quantity: item.quantityOrdered,
-        unitPrice: item.purchasePrice,
-        totalValue: item.quantityOrdered * item.purchasePrice,
+        quantity: quantityOrdered,
+        unitPrice: purchasePrice,
+        totalValue: quantityOrdered * purchasePrice,
         branchId: item.branchDestinationId,
         timestamp: new Date().toISOString(),
         status: 'completed',
@@ -504,10 +521,11 @@ router.post('/:orderId/complete', authenticateToken, authorizeRoles(['admin', 'm
       if (item.orderItemId && !item.orderItemId.startsWith('manual_')) {
         try {
           await airtableHelpers.update(TABLES.ORDER_ITEMS, item.orderItemId, {
-            quantity_received: item.quantityOrdered,
+            quantity_received: quantityOrdered,
             transfer_id: transferId,
             completed_at: new Date().toISOString()
           });
+          console.log('Updated order item:', item.orderItemId);
         } catch (error) {
           console.log('Could not update order item:', error.message);
         }
@@ -529,22 +547,54 @@ router.post('/:orderId/complete', authenticateToken, authorizeRoles(['admin', 'm
     }
     
     await airtableHelpers.update(TABLES.ORDERS, orderId, orderUpdate);
+    console.log('Order marked as completed:', orderId);
+
+    // Ensure all data is serializable before sending response
+    const safeTransferReceipts = transferReceipts.map(receipt => ({
+      transferId: receipt.transferId || '',
+      orderId: receipt.orderId || orderId,
+      productName: receipt.productName || '',
+      quantity: Number(receipt.quantity) || 0,
+      unitPrice: Number(receipt.unitPrice) || 0,
+      totalValue: Number(receipt.totalValue) || 0,
+      branchId: receipt.branchId || '',
+      timestamp: receipt.timestamp || new Date().toISOString(),
+      status: receipt.status || 'completed',
+      type: receipt.type || 'new_product'
+    }));
+
+    const safeProcessedItems = processedItems.map(item => ({
+      productName: item.productName || '',
+      quantityOrdered: Number(item.quantityOrdered) || 0,
+      branchDestinationId: item.branchDestinationId || '',
+      purchasePrice: Number(item.purchasePrice) || 0,
+      transferId: item.transferId || '',
+      processed: true
+    }));
 
     res.json({ 
       success: true,
-      message: `Order completed successfully! ${transferReceipts.length} items transferred to branches.`,
+      message: `Order completed successfully! ${safeTransferReceipts.length} items transferred to branches.`,
       order_status: 'completed',
-      transfers: transferReceipts,
-      processedItems,
+      transfers: safeTransferReceipts,
+      processedItems: safeProcessedItems,
       summary: {
-        totalItems: processedItems.length,
-        newProducts: transferReceipts.filter(r => r.type === 'new_product').length,
-        updatedProducts: transferReceipts.filter(r => r.type === 'quantity_update').length,
-        totalValue: transferReceipts.reduce((sum, r) => sum + r.totalValue, 0)
+        totalItems: safeProcessedItems.length,
+        newProducts: safeTransferReceipts.filter(r => r.type === 'new_product').length,
+        updatedProducts: safeTransferReceipts.filter(r => r.type === 'quantity_update').length,
+        totalValue: safeTransferReceipts.reduce((sum, r) => sum + (Number(r.totalValue) || 0), 0)
       }
     });
   } catch (error) {
     console.error('Complete order error:', error);
+    console.error('Error stack:', error.stack);
+    
+    // Check if response was already sent
+    if (res.headersSent) {
+      console.log('Response already sent, cannot send error response');
+      return;
+    }
+    
     res.status(500).json({ 
       message: 'Failed to complete order',
       error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
