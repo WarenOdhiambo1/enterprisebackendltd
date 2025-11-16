@@ -50,23 +50,24 @@ router.post('/', async (req, res) => {
   try {
     const { items, branchId, customer_name, payment_method, sale_date, employee_id } = req.body;
 
+    console.log('Sale request:', { items, branchId, customer_name, payment_method });
+
     if (!items || items.length === 0 || !branchId) {
       return res.status(400).json({ message: 'Items and branch ID are required' });
     }
 
     // Calculate total amount
     const saleTotal = items.reduce((sum, item) => {
-      return sum + (parseInt(item.quantity) * parseFloat(item.unit_price));
+      return sum + (Number(item.quantity) * Number(item.unit_price));
     }, 0);
     
-    // Create main sale record with complete fields
+    // Create main sale record
     const salesData = {
       branch_id: [branchId],
       customer_name: customer_name || 'Walk-in Customer',
       payment_method: payment_method || 'cash',
       total_amount: saleTotal,
-      sale_date: sale_date || new Date().toISOString().split('T')[0],
-      status: 'completed'
+      sale_date: sale_date || new Date().toISOString().split('T')[0]
     };
     
     if (employee_id) {
@@ -74,57 +75,58 @@ router.post('/', async (req, res) => {
     }
     
     const newSale = await airtableHelpers.create(TABLES.SALES, salesData);
+    console.log('Sale created:', newSale.id);
     
-    // Get all stock once for efficiency
+    // Get all stock for lookup
     const allStock = await airtableHelpers.find(TABLES.STOCK);
     
-    // Process each item: create sale item and reduce stock
+    // Process each item
     const saleItems = [];
     for (const item of items) {
-      if (!item.quantity || !item.unit_price || !item.product_name) continue;
+      if (!item.quantity || !item.unit_price || !item.product_name) {
+        console.log('Skipping invalid item:', item);
+        continue;
+      }
       
-      const quantity = parseInt(item.quantity);
-      const unitPrice = parseFloat(item.unit_price);
+      const quantity = Number(item.quantity);
+      const unitPrice = Number(item.unit_price);
       
-      // Create sale item with complete data
+      // Create sale item
       const saleItemData = {
         sale_id: [newSale.id],
         product_name: item.product_name,
         quantity: quantity,
-        unit_price: unitPrice,
-        total_price: quantity * unitPrice
+        unit_price: unitPrice
       };
       
       try {
         const saleItem = await airtableHelpers.create(TABLES.SALE_ITEMS, saleItemData);
         saleItems.push(saleItem);
+        console.log('Sale item created:', saleItem.id);
         
-        // Find and reduce stock
-        const stockItem = allStock.find(s => 
-          s.branch_id && s.branch_id.includes(branchId) && 
-          s.product_name && s.product_name.toLowerCase().trim() === item.product_name.toLowerCase().trim()
-        );
+        // Find stock by product_id or product_name
+        const stockItem = allStock.find(s => {
+          const matchesBranch = s.branch_id && s.branch_id.includes(branchId);
+          const matchesProduct = (item.product_id && s.product_id === item.product_id) ||
+                               (s.product_name && s.product_name.toLowerCase().trim() === item.product_name.toLowerCase().trim());
+          return matchesBranch && matchesProduct;
+        });
         
-        if (stockItem && stockItem.quantity_available >= quantity) {
-          const newQuantity = stockItem.quantity_available - quantity;
-          await airtableHelpers.update(TABLES.STOCK, stockItem.id, {
-            quantity_available: newQuantity
-          });
-          
-          // Create stock movement record
-          await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, {
-            movement_type: 'sale',
-            from_branch_id: [branchId],
-            product_name: item.product_name,
-            quantity: quantity,
-            reason: `Sale to ${customer_name || 'customer'}`,
-            status: 'completed'
-          });
+        if (stockItem) {
+          if (stockItem.quantity_available >= quantity) {
+            const newQuantity = stockItem.quantity_available - quantity;
+            await airtableHelpers.update(TABLES.STOCK, stockItem.id, {
+              quantity_available: newQuantity
+            });
+            console.log(`Stock reduced: ${item.product_name} from ${stockItem.quantity_available} to ${newQuantity}`);
+          } else {
+            console.log(`Insufficient stock for ${item.product_name}: available ${stockItem.quantity_available}, needed ${quantity}`);
+          }
         } else {
-          console.log(`Insufficient stock for ${item.product_name}`);
+          console.log(`Stock not found for product: ${item.product_name} in branch: ${branchId}`);
         }
       } catch (itemError) {
-        console.error('Sale item error:', itemError);
+        console.error('Sale item error:', itemError.message);
       }
     }
     
