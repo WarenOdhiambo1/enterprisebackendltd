@@ -1011,4 +1011,164 @@ router.get('/reports/payroll', authenticateToken, authorizeRoles(['hr', 'admin',
   }
 });
 
+// Get employees by branch
+router.get('/employees/by-branch/:branchId', authenticateToken, authorizeRoles(['hr', 'admin', 'boss', 'manager']), async (req, res) => {
+  try {
+    const { branchId } = req.params;
+    
+    const allEmployees = await airtableHelpers.find(TABLES.EMPLOYEES);
+    const employees = allEmployees.filter(emp => 
+      emp.branch_id && emp.branch_id.includes(branchId)
+    );
+    
+    res.json(employees);
+  } catch (error) {
+    console.error('Get employees by branch error:', error);
+    res.status(500).json({ message: 'Failed to fetch employees by branch' });
+  }
+});
+
+// Get employees by role
+router.get('/employees/by-role/:role', authenticateToken, authorizeRoles(['hr', 'admin', 'boss', 'manager']), async (req, res) => {
+  try {
+    const { role } = req.params;
+    
+    const allEmployees = await airtableHelpers.find(TABLES.EMPLOYEES);
+    const employees = allEmployees.filter(emp => emp.role === role);
+    
+    res.json(employees);
+  } catch (error) {
+    console.error('Get employees by role error:', error);
+    res.status(500).json({ message: 'Failed to fetch employees by role' });
+  }
+});
+
+// Get employee sales
+router.get('/employees/:id/sales', authenticateToken, authorizeRoles(['hr', 'admin', 'boss', 'manager']), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { startDate, endDate } = req.query;
+    
+    let filterFormula = `FIND("${id}", ARRAYJOIN({employee_id}))`;
+    
+    if (startDate && endDate) {
+      const dateFilter = `AND(IS_AFTER({sale_date}, "${startDate}"), IS_BEFORE({sale_date}, "${endDate}"))`;
+      filterFormula = `AND(${filterFormula}, ${dateFilter})`;
+    }
+    
+    const sales = await airtableHelpers.find(TABLES.SALES, filterFormula);
+    
+    const summary = {
+      totalSales: sales.reduce((sum, sale) => sum + (parseFloat(sale.total_amount) || 0), 0),
+      salesCount: sales.length,
+      averageSale: sales.length > 0 ? sales.reduce((sum, sale) => sum + (parseFloat(sale.total_amount) || 0), 0) / sales.length : 0
+    };
+    
+    res.json({ sales, summary });
+  } catch (error) {
+    console.error('Get employee sales error:', error);
+    res.status(500).json({ message: 'Failed to fetch employee sales' });
+  }
+});
+
+// Get employee expenses
+router.get('/employees/:id/expenses', authenticateToken, authorizeRoles(['hr', 'admin', 'boss', 'manager']), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { startDate, endDate } = req.query;
+    
+    let filterFormula = `FIND("${id}", ARRAYJOIN({recorded_by}))`;
+    
+    if (startDate && endDate) {
+      const dateFilter = `AND(IS_AFTER({expense_date}, "${startDate}"), IS_BEFORE({expense_date}, "${endDate}"))`;
+      filterFormula = `AND(${filterFormula}, ${dateFilter})`;
+    }
+    
+    const expenses = await airtableHelpers.find(TABLES.EXPENSES, filterFormula);
+    
+    const summary = {
+      totalExpenses: expenses.reduce((sum, expense) => sum + (parseFloat(expense.amount) || 0), 0),
+      expenseCount: expenses.length,
+      averageExpense: expenses.length > 0 ? expenses.reduce((sum, expense) => sum + (parseFloat(expense.amount) || 0), 0) / expenses.length : 0,
+      categoryBreakdown: expenses.reduce((acc, expense) => {
+        const category = expense.category || 'other';
+        acc[category] = (acc[category] || 0) + (parseFloat(expense.amount) || 0);
+        return acc;
+      }, {})
+    };
+    
+    res.json({ expenses, summary });
+  } catch (error) {
+    console.error('Get employee expenses error:', error);
+    res.status(500).json({ message: 'Failed to fetch employee expenses' });
+  }
+});
+
+// Get employee payroll history
+router.get('/employees/:id/payroll', authenticateToken, authorizeRoles(['hr', 'admin', 'boss', 'manager']), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { limit = 12 } = req.query;
+    
+    const payrollHistory = await airtableHelpers.find(
+      TABLES.PAYROLL,
+      `FIND("${id}", ARRAYJOIN({employee_id}))`
+    );
+    
+    // Sort by period_start descending and limit
+    const sortedPayroll = payrollHistory
+      .sort((a, b) => new Date(b.period_start) - new Date(a.period_start))
+      .slice(0, parseInt(limit));
+    
+    const summary = {
+      totalPayroll: payrollHistory.reduce((sum, p) => sum + (parseFloat(p.net_salary) || 0), 0),
+      averagePayroll: payrollHistory.length > 0 ? payrollHistory.reduce((sum, p) => sum + (parseFloat(p.net_salary) || 0), 0) / payrollHistory.length : 0,
+      lastPayment: payrollHistory.find(p => p.payment_status === 'paid'),
+      pendingPayments: payrollHistory.filter(p => p.payment_status === 'pending').length
+    };
+    
+    res.json({ payroll: sortedPayroll, summary });
+  } catch (error) {
+    console.error('Get employee payroll error:', error);
+    res.status(500).json({ message: 'Failed to fetch employee payroll' });
+  }
+});
+
+// Activate employee
+router.post('/employees/:id/activate', authenticateToken, authorizeRoles(['hr', 'admin', 'boss']), async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const updatedEmployee = await airtableHelpers.update(TABLES.EMPLOYEES, id, {
+      is_active: true,
+      updated_at: new Date().toISOString()
+    });
+    
+    res.json({ success: true, message: 'Employee activated successfully', employee: updatedEmployee });
+  } catch (error) {
+    console.error('Activate employee error:', error);
+    res.status(500).json({ message: 'Failed to activate employee' });
+  }
+});
+
+// Deactivate employee
+router.post('/employees/:id/deactivate', authenticateToken, authorizeRoles(['hr', 'admin', 'boss']), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+    
+    const updatedEmployee = await airtableHelpers.update(TABLES.EMPLOYEES, id, {
+      is_active: false,
+      deactivation_reason: reason || 'No reason provided',
+      deactivated_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    });
+    
+    res.json({ success: true, message: 'Employee deactivated successfully', employee: updatedEmployee });
+  } catch (error) {
+    console.error('Deactivate employee error:', error);
+    res.status(500).json({ message: 'Failed to deactivate employee' });
+  }
+});
+
 module.exports = router;

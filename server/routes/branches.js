@@ -270,4 +270,201 @@ router.delete('/:id', authenticateToken, authorizeRoles(['boss', 'admin']), asyn
   }
 });
 
+// Get branch employees
+router.get('/:id/employees', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const allEmployees = await airtableHelpers.find(TABLES.EMPLOYEES);
+    const employees = allEmployees.filter(emp => 
+      emp.branch_id && emp.branch_id.includes(id)
+    );
+    
+    res.json(employees);
+  } catch (error) {
+    console.error('Get branch employees error:', error);
+    res.status(500).json({ message: 'Failed to fetch branch employees' });
+  }
+});
+
+// Get branch stock
+router.get('/:id/stock', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const allStock = await airtableHelpers.find(TABLES.STOCK);
+    const stock = allStock.filter(item => 
+      item.branch_id && item.branch_id.includes(id)
+    );
+    
+    res.json(stock);
+  } catch (error) {
+    console.error('Get branch stock error:', error);
+    res.status(500).json({ message: 'Failed to fetch branch stock' });
+  }
+});
+
+// Get branch sales
+router.get('/:id/sales', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { startDate, endDate } = req.query;
+    
+    let filterFormula = `FIND("${id}", ARRAYJOIN({branch_id}))`;
+    
+    if (startDate && endDate) {
+      const dateFilter = `AND(IS_AFTER({sale_date}, "${startDate}"), IS_BEFORE({sale_date}, "${endDate}"))`;
+      filterFormula = `AND(${filterFormula}, ${dateFilter})`;
+    }
+    
+    const sales = await airtableHelpers.find(TABLES.SALES, filterFormula);
+    
+    res.json(sales);
+  } catch (error) {
+    console.error('Get branch sales error:', error);
+    res.status(500).json({ message: 'Failed to fetch branch sales' });
+  }
+});
+
+// Get branch expenses
+router.get('/:id/expenses', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { startDate, endDate } = req.query;
+    
+    let filterFormula = `FIND("${id}", ARRAYJOIN({branch_id}))`;
+    
+    if (startDate && endDate) {
+      const dateFilter = `AND(IS_AFTER({expense_date}, "${startDate}"), IS_BEFORE({expense_date}, "${endDate}"))`;
+      filterFormula = `AND(${filterFormula}, ${dateFilter})`;
+    }
+    
+    const expenses = await airtableHelpers.find(TABLES.EXPENSES, filterFormula);
+    
+    res.json(expenses);
+  } catch (error) {
+    console.error('Get branch expenses error:', error);
+    res.status(500).json({ message: 'Failed to fetch branch expenses' });
+  }
+});
+
+// Get branch vehicles
+router.get('/:id/vehicles', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const allVehicles = await airtableHelpers.find(TABLES.VEHICLES);
+    const vehicles = allVehicles.filter(vehicle => 
+      vehicle.branch_id && vehicle.branch_id.includes(id)
+    );
+    
+    res.json(vehicles);
+  } catch (error) {
+    console.error('Get branch vehicles error:', error);
+    res.status(500).json({ message: 'Failed to fetch branch vehicles' });
+  }
+});
+
+// Get branch analytics
+router.get('/:id/analytics', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { period = '30' } = req.query;
+    
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - parseInt(period));
+    
+    const [sales, expenses, employees, stock] = await Promise.all([
+      airtableHelpers.find(TABLES.SALES, `FIND("${id}", ARRAYJOIN({branch_id}))`),
+      airtableHelpers.find(TABLES.EXPENSES, `FIND("${id}", ARRAYJOIN({branch_id}))`),
+      airtableHelpers.find(TABLES.EMPLOYEES).then(emps => emps.filter(e => e.branch_id && e.branch_id.includes(id))),
+      airtableHelpers.find(TABLES.STOCK).then(stock => stock.filter(s => s.branch_id && s.branch_id.includes(id)))
+    ]);
+    
+    const totalRevenue = sales.reduce((sum, sale) => sum + (parseFloat(sale.total_amount) || 0), 0);
+    const totalExpenses = expenses.reduce((sum, expense) => sum + (parseFloat(expense.amount) || 0), 0);
+    const stockValue = stock.reduce((sum, item) => sum + ((item.quantity_available || 0) * (item.unit_price || 0)), 0);
+    
+    const analytics = {
+      revenue: {
+        total: totalRevenue,
+        count: sales.length,
+        average: sales.length > 0 ? totalRevenue / sales.length : 0
+      },
+      expenses: {
+        total: totalExpenses,
+        count: expenses.length,
+        average: expenses.length > 0 ? totalExpenses / expenses.length : 0
+      },
+      profit: totalRevenue - totalExpenses,
+      employees: {
+        total: employees.length,
+        active: employees.filter(e => e.status === 'active').length
+      },
+      stock: {
+        totalItems: stock.length,
+        totalValue: stockValue,
+        lowStock: stock.filter(item => item.quantity_available <= (item.reorder_level || 10)).length
+      }
+    };
+    
+    res.json(analytics);
+  } catch (error) {
+    console.error('Get branch analytics error:', error);
+    res.status(500).json({ message: 'Failed to fetch branch analytics' });
+  }
+});
+
+// Transfer stock between branches
+router.post('/:id/transfer-stock', authenticateToken, authorizeRoles(['manager', 'admin', 'boss']), async (req, res) => {
+  try {
+    const { id: fromBranchId } = req.params;
+    const { toBranchId, items, reason } = req.body;
+    
+    if (!toBranchId || !items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ message: 'To branch ID and items are required' });
+    }
+    
+    const transferId = `TRF_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+    const movements = [];
+    
+    for (const item of items) {
+      const { productName, quantity, unitCost } = item;
+      
+      if (!productName || !quantity || quantity <= 0) {
+        continue;
+      }
+      
+      const movement = await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, {
+        transfer_id: transferId,
+        movement_type: 'transfer_out',
+        from_branch_id: [fromBranchId],
+        to_branch_id: [toBranchId],
+        product_name: productName,
+        quantity: parseInt(quantity),
+        unit_cost: parseFloat(unitCost) || 0,
+        total_cost: parseInt(quantity) * (parseFloat(unitCost) || 0),
+        reason: reason || 'Branch stock transfer',
+        status: 'pending',
+        requested_by: [req.user.id],
+        transfer_date: new Date().toISOString().split('T')[0],
+        created_at: new Date().toISOString()
+      });
+      
+      movements.push(movement);
+    }
+    
+    res.json({
+      success: true,
+      message: 'Stock transfer initiated successfully',
+      transferId,
+      movements: movements.length
+    });
+  } catch (error) {
+    console.error('Transfer stock error:', error);
+    res.status(500).json({ message: 'Failed to transfer stock' });
+  }
+});
+
 module.exports = router;

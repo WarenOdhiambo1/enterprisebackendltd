@@ -1,252 +1,138 @@
 const express = require('express');
 const { airtableHelpers, TABLES } = require('../config/airtable');
-const { authenticateToken, authorizeRoles, auditLog } = require('../middleware/auth');
+const { authenticateToken, authorizeRoles } = require('../middleware/auth');
 
 const router = express.Router();
 
 // Get all inventory adjustments
-router.get('/', authenticateToken, authorizeRoles(['admin', 'manager', 'boss']), async (req, res) => {
+router.get('/', authenticateToken, async (req, res) => {
   try {
-    const { status, startDate, endDate, branchId, adjustmentType } = req.query;
+    const { branch_id, adjustment_type, status, startDate, endDate } = req.query;
     
-    let filterFormula = '';
+    let adjustments = await airtableHelpers.find(TABLES.INVENTORY_ADJUSTMENTS);
+    
+    // Apply filters
+    if (branch_id) {
+      adjustments = adjustments.filter(adj => 
+        adj.branch_id && adj.branch_id.includes(branch_id)
+      );
+    }
+    
+    if (adjustment_type) {
+      adjustments = adjustments.filter(adj => adj.adjustment_type === adjustment_type);
+    }
+    
     if (status) {
-      filterFormula = `{status} = "${status}"`;
+      adjustments = adjustments.filter(adj => adj.status === status);
     }
     
     if (startDate && endDate) {
-      const dateFilter = `AND(IS_AFTER({adjustment_date}, "${startDate}"), IS_BEFORE({adjustment_date}, "${endDate}"))`;
-      filterFormula = filterFormula ? `AND(${filterFormula}, ${dateFilter})` : dateFilter;
+      adjustments = adjustments.filter(adj => {
+        const adjDate = new Date(adj.adjustment_date);
+        return adjDate >= new Date(startDate) && adjDate <= new Date(endDate);
+      });
     }
     
-    if (branchId && branchId !== 'all') {
-      const branchFilter = `{branch_id} = "${branchId}"`;
-      filterFormula = filterFormula ? `AND(${filterFormula}, ${branchFilter})` : branchFilter;
-    }
-    
-    if (adjustmentType) {
-      const typeFilter = `{adjustment_type} = "${adjustmentType}"`;
-      filterFormula = filterFormula ? `AND(${filterFormula}, ${typeFilter})` : typeFilter;
-    }
-
-    const adjustments = await airtableHelpers.find(TABLES.INVENTORY_ADJUSTMENTS, filterFormula);
-    
-    // Enrich with adjustment items
-    const enrichedAdjustments = await Promise.all(
-      adjustments.map(async (adjustment) => {
-        try {
-          const items = await airtableHelpers.find(
-            TABLES.ADJUSTMENT_ITEMS,
-            `{adjustment_id} = "${adjustment.id}"`
-          );
-          
-          return {
-            ...adjustment,
-            items: items || [],
-            total_items: items.length,
-            total_value_impact: items.reduce((sum, item) => sum + (item.value_impact || 0), 0)
-          };
-        } catch (error) {
-          return { ...adjustment, items: [], total_items: 0, total_value_impact: 0 };
-        }
-      })
-    );
-
-    res.json(enrichedAdjustments);
+    res.json(adjustments);
   } catch (error) {
     console.error('Get inventory adjustments error:', error);
     res.status(500).json({ message: 'Failed to fetch inventory adjustments' });
   }
 });
 
-// Create new inventory adjustment
-router.post('/', authenticateToken, authorizeRoles(['admin', 'manager', 'boss']), auditLog('CREATE_INVENTORY_ADJUSTMENT'), async (req, res) => {
+// Create inventory adjustment
+router.post('/', authenticateToken, authorizeRoles(['manager', 'admin', 'boss']), async (req, res) => {
   try {
     const {
       branch_id,
+      product_name,
       adjustment_type,
-      adjustment_date,
+      quantity_change,
       reason,
-      reference_number,
-      notes,
-      items
+      reference_number
     } = req.body;
-
-    if (!branch_id || !adjustment_type || !adjustment_date || !items || items.length === 0) {
+    
+    if (!branch_id || !product_name || !adjustment_type || !quantity_change) {
       return res.status(400).json({ 
-        message: 'Branch, adjustment type, date, and items are required' 
+        message: 'Branch ID, product name, adjustment type, and quantity change are required' 
       });
     }
-
-    const validTypes = ['stock_take', 'damage', 'theft', 'expiry', 'found', 'transfer_correction', 'other'];
-    if (!validTypes.includes(adjustment_type)) {
-      return res.status(400).json({ message: 'Invalid adjustment type' });
-    }
-
-    // Create adjustment record
+    
     const adjustmentData = {
       branch_id: [branch_id],
+      product_name,
       adjustment_type,
-      adjustment_date,
+      quantity_change: parseInt(quantity_change),
       reason: reason || '',
       reference_number: reference_number || `ADJ_${Date.now()}`,
-      notes: notes || '',
-      status: 'draft',
-      created_by: [req.user.id],
+      status: 'pending',
+      requested_by: [req.user.id],
+      adjustment_date: new Date().toISOString().split('T')[0],
       created_at: new Date().toISOString()
     };
-
-    const adjustment = await airtableHelpers.create(TABLES.INVENTORY_ADJUSTMENTS, adjustmentData);
-
-    // Create adjustment items and calculate impacts
-    const adjustmentItems = [];
-    let totalValueImpact = 0;
-    let totalQuantityImpact = 0;
-
-    for (const item of items) {
-      if (!item.product_name) continue;
-
-      // Get current stock to calculate impact
-      const currentStock = await airtableHelpers.find(
-        TABLES.STOCK,
-        `AND({branch_id} = "${branch_id}", {product_name} = "${item.product_name}")`
-      );
-
-      const currentQuantity = currentStock.length > 0 ? currentStock[0].quantity_available : 0;
-      const currentUnitPrice = currentStock.length > 0 ? currentStock[0].unit_price : 0;
-      
-      const systemQuantity = Number(item.system_quantity) || currentQuantity;
-      const actualQuantity = Number(item.actual_quantity) || 0;
-      const quantityDifference = actualQuantity - systemQuantity;
-      const valueImpact = quantityDifference * currentUnitPrice;
-
-      const adjustmentItem = await airtableHelpers.create(TABLES.ADJUSTMENT_ITEMS, {
-        adjustment_id: [adjustment.id],
-        product_name: item.product_name,
-        system_quantity: systemQuantity,
-        actual_quantity: actualQuantity,
-        quantity_difference: quantityDifference,
-        unit_cost: currentUnitPrice,
-        value_impact: valueImpact,
-        reason: item.reason || reason || '',
-        notes: item.notes || ''
-      });
-
-      adjustmentItems.push(adjustmentItem);
-      totalValueImpact += valueImpact;
-      totalQuantityImpact += Math.abs(quantityDifference);
-    }
-
-    // Update adjustment with totals
-    await airtableHelpers.update(TABLES.INVENTORY_ADJUSTMENTS, adjustment.id, {
-      total_items: adjustmentItems.length,
-      total_value_impact: totalValueImpact,
-      total_quantity_impact: totalQuantityImpact
-    });
-
+    
+    const newAdjustment = await airtableHelpers.create(TABLES.INVENTORY_ADJUSTMENTS, adjustmentData);
+    
     res.status(201).json({
+      success: true,
       message: 'Inventory adjustment created successfully',
-      adjustment: { 
-        ...adjustment, 
-        items: adjustmentItems,
-        total_items: adjustmentItems.length,
-        total_value_impact: totalValueImpact,
-        total_quantity_impact: totalQuantityImpact
-      }
+      adjustment: newAdjustment
     });
   } catch (error) {
     console.error('Create inventory adjustment error:', error);
-    res.status(500).json({ 
-      message: 'Failed to create inventory adjustment',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
-    });
+    res.status(500).json({ message: 'Failed to create inventory adjustment' });
   }
 });
 
-// Approve and apply adjustment
-router.put('/:adjustmentId/approve', authenticateToken, authorizeRoles(['admin', 'manager', 'boss']), auditLog('APPROVE_INVENTORY_ADJUSTMENT'), async (req, res) => {
+// Approve inventory adjustment
+router.put('/:id/approve', authenticateToken, authorizeRoles(['manager', 'admin', 'boss']), async (req, res) => {
   try {
-    const { adjustmentId } = req.params;
-    const { approval_notes } = req.body;
-
-    const adjustment = await airtableHelpers.findById(TABLES.INVENTORY_ADJUSTMENTS, adjustmentId);
+    const { id } = req.params;
+    
+    const adjustment = await airtableHelpers.findById(TABLES.INVENTORY_ADJUSTMENTS, id);
     if (!adjustment) {
       return res.status(404).json({ message: 'Inventory adjustment not found' });
     }
-
-    if (adjustment.status !== 'draft') {
-      return res.status(400).json({ message: 'Only draft adjustments can be approved' });
-    }
-
-    // Get adjustment items
-    const items = await airtableHelpers.find(
-      TABLES.ADJUSTMENT_ITEMS,
-      `{adjustment_id} = "${adjustmentId}"`
-    );
-
-    // Apply adjustments to stock
-    const appliedItems = [];
-    for (const item of items) {
-      if (item.quantity_difference === 0) continue;
-
-      // Find stock record
-      const stockRecords = await airtableHelpers.find(
-        TABLES.STOCK,
-        `AND({branch_id} = "${adjustment.branch_id[0]}", {product_name} = "${item.product_name}")`
-      );
-
-      if (stockRecords.length > 0) {
-        const stock = stockRecords[0];
-        const newQuantity = Math.max(0, stock.quantity_available + item.quantity_difference);
-        
-        // Update stock quantity
-        await airtableHelpers.update(TABLES.STOCK, stock.id, {
-          quantity_available: newQuantity,
-          last_updated: new Date().toISOString(),
-          last_adjustment_date: adjustment.adjustment_date
-        });
-
-        // Create stock movement record
-        await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, {
-          to_branch_id: adjustment.branch_id,
-          product_name: item.product_name,
-          quantity: Math.abs(item.quantity_difference),
-          movement_type: item.quantity_difference > 0 ? 'adjustment_increase' : 'adjustment_decrease',
-          reason: `Inventory adjustment: ${adjustment.reason}`,
-          status: 'completed',
-          transfer_date: adjustment.adjustment_date,
-          created_by: [req.user.id],
-          adjustment_id: [adjustmentId],
-          unit_cost: item.unit_cost,
-          total_cost: Math.abs(item.value_impact)
-        });
-
-        appliedItems.push({
-          product_name: item.product_name,
-          old_quantity: stock.quantity_available,
-          new_quantity: newQuantity,
-          adjustment: item.quantity_difference,
-          value_impact: item.value_impact
-        });
-      }
-    }
-
+    
     // Update adjustment status
-    await airtableHelpers.update(TABLES.INVENTORY_ADJUSTMENTS, adjustmentId, {
+    await airtableHelpers.update(TABLES.INVENTORY_ADJUSTMENTS, id, {
       status: 'approved',
       approved_by: [req.user.id],
-      approved_at: new Date().toISOString(),
-      approval_notes: approval_notes || '',
-      applied_items_count: appliedItems.length
+      approved_at: new Date().toISOString()
     });
-
+    
+    // Apply stock changes
+    const allStock = await airtableHelpers.find(TABLES.STOCK);
+    const stockItem = allStock.find(item => 
+      item.branch_id && item.branch_id.includes(adjustment.branch_id[0]) && 
+      item.product_name === adjustment.product_name
+    );
+    
+    if (stockItem) {
+      const newQuantity = Math.max(0, stockItem.quantity_available + adjustment.quantity_change);
+      await airtableHelpers.update(TABLES.STOCK, stockItem.id, {
+        quantity_available: newQuantity,
+        last_updated: new Date().toISOString()
+      });
+    }
+    
+    // Create stock movement record
+    await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, {
+      movement_type: 'adjustment',
+      product_name: adjustment.product_name,
+      quantity: Math.abs(adjustment.quantity_change),
+      from_branch_id: adjustment.quantity_change < 0 ? adjustment.branch_id : null,
+      to_branch_id: adjustment.quantity_change > 0 ? adjustment.branch_id : null,
+      reason: `Inventory adjustment: ${adjustment.reason}`,
+      status: 'completed',
+      adjustment_id: [id],
+      approved_by: [req.user.id],
+      created_at: new Date().toISOString()
+    });
+    
     res.json({
-      message: 'Inventory adjustment approved and applied successfully',
-      applied_items: appliedItems,
-      summary: {
-        total_items_adjusted: appliedItems.length,
-        total_value_impact: appliedItems.reduce((sum, item) => sum + item.value_impact, 0)
-      }
+      success: true,
+      message: 'Inventory adjustment approved and applied successfully'
     });
   } catch (error) {
     console.error('Approve inventory adjustment error:', error);
@@ -254,89 +140,45 @@ router.put('/:adjustmentId/approve', authenticateToken, authorizeRoles(['admin',
   }
 });
 
-// Reject adjustment
-router.put('/:adjustmentId/reject', authenticateToken, authorizeRoles(['admin', 'manager', 'boss']), auditLog('REJECT_INVENTORY_ADJUSTMENT'), async (req, res) => {
+// Reject inventory adjustment
+router.put('/:id/reject', authenticateToken, authorizeRoles(['manager', 'admin', 'boss']), async (req, res) => {
   try {
-    const { adjustmentId } = req.params;
+    const { id } = req.params;
     const { rejection_reason } = req.body;
-
-    if (!rejection_reason) {
-      return res.status(400).json({ message: 'Rejection reason is required' });
-    }
-
-    await airtableHelpers.update(TABLES.INVENTORY_ADJUSTMENTS, adjustmentId, {
+    
+    await airtableHelpers.update(TABLES.INVENTORY_ADJUSTMENTS, id, {
       status: 'rejected',
-      rejected_by: [req.user.id],
-      rejected_at: new Date().toISOString(),
-      rejection_reason
+      approved_by: [req.user.id],
+      approved_at: new Date().toISOString(),
+      rejection_reason: rejection_reason || 'No reason provided'
     });
-
-    res.json({ message: 'Inventory adjustment rejected successfully' });
+    
+    res.json({
+      success: true,
+      message: 'Inventory adjustment rejected successfully'
+    });
   } catch (error) {
     console.error('Reject inventory adjustment error:', error);
     res.status(500).json({ message: 'Failed to reject inventory adjustment' });
   }
 });
 
-// Get adjustment by ID
-router.get('/:adjustmentId', authenticateToken, authorizeRoles(['admin', 'manager', 'boss']), async (req, res) => {
+// Get pending adjustments
+router.get('/pending', authenticateToken, async (req, res) => {
   try {
-    const { adjustmentId } = req.params;
+    const { branch_id } = req.query;
     
-    const adjustment = await airtableHelpers.findById(TABLES.INVENTORY_ADJUSTMENTS, adjustmentId);
-    if (!adjustment) {
-      return res.status(404).json({ message: 'Inventory adjustment not found' });
+    let filterFormula = '{status} = "pending"';
+    if (branch_id) {
+      filterFormula = `AND(${filterFormula}, FIND("${branch_id}", ARRAYJOIN({branch_id})))`;
     }
-
-    // Get adjustment items
-    const items = await airtableHelpers.find(
-      TABLES.ADJUSTMENT_ITEMS,
-      `{adjustment_id} = "${adjustmentId}"`
-    );
-
-    res.json({
-      ...adjustment,
-      items,
-      total_items: items.length,
-      total_value_impact: items.reduce((sum, item) => sum + (item.value_impact || 0), 0)
-    });
+    
+    const pendingAdjustments = await airtableHelpers.find(TABLES.INVENTORY_ADJUSTMENTS, filterFormula);
+    
+    res.json(pendingAdjustments);
   } catch (error) {
-    console.error('Get adjustment error:', error);
-    res.status(500).json({ message: 'Failed to fetch inventory adjustment' });
-  }
-});
-
-// Delete adjustment (only if draft)
-router.delete('/:adjustmentId', authenticateToken, authorizeRoles(['admin', 'boss']), auditLog('DELETE_INVENTORY_ADJUSTMENT'), async (req, res) => {
-  try {
-    const { adjustmentId } = req.params;
-
-    const adjustment = await airtableHelpers.findById(TABLES.INVENTORY_ADJUSTMENTS, adjustmentId);
-    if (!adjustment) {
-      return res.status(404).json({ message: 'Inventory adjustment not found' });
-    }
-
-    if (adjustment.status !== 'draft') {
-      return res.status(400).json({ message: 'Only draft adjustments can be deleted' });
-    }
-
-    // Delete adjustment items first
-    const items = await airtableHelpers.find(
-      TABLES.ADJUSTMENT_ITEMS,
-      `{adjustment_id} = "${adjustmentId}"`
-    );
-
-    await Promise.all(
-      items.map(item => airtableHelpers.delete(TABLES.ADJUSTMENT_ITEMS, item.id))
-    );
-
-    // Delete adjustment
-    await airtableHelpers.delete(TABLES.INVENTORY_ADJUSTMENTS, adjustmentId);
-
-    res.json({ message: 'Inventory adjustment deleted successfully' });
-  } catch (error) {
-    console.error('Delete adjustment error:', error);
-    res.status(500).json({ message: 'Failed to delete inventory adjustment' });
+    console.error('Get pending adjustments error:', error);
+    res.status(500).json({ message: 'Failed to fetch pending adjustments' });
   }
 });
 

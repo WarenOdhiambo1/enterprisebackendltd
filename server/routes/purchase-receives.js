@@ -289,4 +289,104 @@ router.delete('/:receiveId', authenticateToken, authorizeRoles(['admin', 'boss']
   }
 });
 
+// Get pending receives
+router.get('/pending', authenticateToken, async (req, res) => {
+  try {
+    const { branch_id } = req.query;
+    
+    let filterFormula = '{status} = "pending"';
+    if (branch_id) {
+      filterFormula = `AND(${filterFormula}, FIND("${branch_id}", ARRAYJOIN({receiving_branch_id})))`;
+    }
+    
+    const pendingReceives = await airtableHelpers.find(TABLES.PURCHASE_RECEIVES, filterFormula);
+    
+    res.json(pendingReceives);
+  } catch (error) {
+    console.error('Get pending receives error:', error);
+    res.status(500).json({ message: 'Failed to fetch pending receives' });
+  }
+});
+
+// Approve receive
+router.post('/:id/approve', authenticateToken, authorizeRoles(['manager', 'admin', 'boss']), async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const receive = await airtableHelpers.findById(TABLES.PURCHASE_RECEIVES, id);
+    if (!receive) {
+      return res.status(404).json({ message: 'Purchase receive not found' });
+    }
+    
+    // Update receive status
+    await airtableHelpers.update(TABLES.PURCHASE_RECEIVES, id, {
+      status: 'approved',
+      approved_by: [req.user.id],
+      approved_at: new Date().toISOString()
+    });
+    
+    // Get receive items and add to stock
+    const receiveItems = await airtableHelpers.find(
+      TABLES.RECEIVE_ITEMS,
+      `FIND("${id}", ARRAYJOIN({receive_id}))`
+    );
+    
+    for (const item of receiveItems) {
+      if (item.condition === 'good' && item.quantity_received > 0) {
+        // Check if product exists in receiving branch
+        const allStock = await airtableHelpers.find(TABLES.STOCK);
+        const existingStock = allStock.find(stock => 
+          stock.branch_id && stock.branch_id.includes(receive.receiving_branch_id[0]) && 
+          stock.product_name === item.product_name
+        );
+        
+        if (existingStock) {
+          // Update existing stock
+          const newQuantity = existingStock.quantity_available + item.quantity_received;
+          await airtableHelpers.update(TABLES.STOCK, existingStock.id, {
+            quantity_available: newQuantity,
+            unit_price: item.unit_cost || existingStock.unit_price,
+            last_updated: new Date().toISOString()
+          });
+        } else {
+          // Create new stock entry
+          await airtableHelpers.create(TABLES.STOCK, {
+            branch_id: receive.receiving_branch_id,
+            product_name: item.product_name,
+            quantity_available: item.quantity_received,
+            unit_price: item.unit_cost || 0,
+            reorder_level: 10,
+            last_updated: new Date().toISOString()
+          });
+        }
+        
+        // Create stock movement record
+        await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, {
+          movement_type: 'receive',
+          to_branch_id: receive.receiving_branch_id,
+          product_name: item.product_name,
+          quantity: item.quantity_received,
+          unit_cost: item.unit_cost || 0,
+          total_cost: item.total_cost || 0,
+          reason: `Purchase receive approved`,
+          status: 'completed',
+          receive_id: [id],
+          approved_by: [req.user.id],
+          created_at: new Date().toISOString(),
+          approved_at: new Date().toISOString()
+        });
+      }
+    }
+    
+    res.json({
+      success: true,
+      message: 'Purchase receive approved and stock updated successfully',
+      items_processed: receiveItems.length
+    });
+  } catch (error) {
+    console.error('Approve receive error:', error);
+    res.status(500).json({ message: 'Failed to approve purchase receive' });
+  }
+});
+
 module.exports = router;
