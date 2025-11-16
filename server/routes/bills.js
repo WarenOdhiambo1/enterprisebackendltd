@@ -4,6 +4,121 @@ const { authenticateToken, authorizeRoles, auditLog } = require('../middleware/a
 
 const router = express.Router();
 
+// Bills dashboard
+router.get('/dashboard', authenticateToken, async (req, res) => {
+  try {
+    const [bills, payments] = await Promise.all([
+      airtableHelpers.find(TABLES.BILLS),
+      airtableHelpers.find(TABLES.PAYMENTS_MADE)
+    ]);
+
+    const totalOutstanding = bills.reduce((sum, bill) => {
+      if (bill.payment_status !== 'paid') {
+        return sum + (parseFloat(bill.total_amount) || 0);
+      }
+      return sum;
+    }, 0);
+
+    const statusBreakdown = bills.reduce((acc, bill) => {
+      const status = bill.status || 'draft';
+      acc[status] = (acc[status] || 0) + 1;
+      return acc;
+    }, {});
+
+    const paymentStatusBreakdown = bills.reduce((acc, bill) => {
+      const paymentStatus = bill.payment_status || 'unpaid';
+      acc[paymentStatus] = (acc[paymentStatus] || 0) + 1;
+      return acc;
+    }, {});
+
+    // Aging analysis
+    const today = new Date();
+    const aging = { '0-30': 0, '31-60': 0, '61-90': 0, '90+': 0 };
+    
+    bills.forEach(bill => {
+      if (bill.payment_status !== 'paid' && bill.bill_date) {
+        const billDate = new Date(bill.bill_date);
+        const daysDiff = Math.floor((today - billDate) / (1000 * 60 * 60 * 24));
+        
+        if (daysDiff <= 30) aging['0-30'] += parseFloat(bill.total_amount) || 0;
+        else if (daysDiff <= 60) aging['31-60'] += parseFloat(bill.total_amount) || 0;
+        else if (daysDiff <= 90) aging['61-90'] += parseFloat(bill.total_amount) || 0;
+        else aging['90+'] += parseFloat(bill.total_amount) || 0;
+      }
+    });
+
+    res.json({
+      totalOutstanding,
+      billCount: bills.length,
+      statusBreakdown,
+      paymentStatusBreakdown,
+      aging,
+      recentBills: bills.slice(-5),
+      upcomingPayments: bills.filter(b => b.due_date && new Date(b.due_date) <= new Date(Date.now() + 7 * 24 * 60 * 60 * 1000))
+    });
+  } catch (error) {
+    console.error('Bills dashboard error:', error);
+    res.status(500).json({ message: 'Failed to fetch bills dashboard' });
+  }
+});
+
+// Bills list with filtering
+router.get('/list', authenticateToken, async (req, res) => {
+  try {
+    const { status, paymentStatus, vendor, startDate, endDate, page = 1, limit = 50 } = req.query;
+    let bills = await airtableHelpers.find(TABLES.BILLS);
+    
+    if (status) bills = bills.filter(bill => bill.status === status);
+    if (paymentStatus) bills = bills.filter(bill => bill.payment_status === paymentStatus);
+    if (vendor) bills = bills.filter(bill => bill.vendor_name && bill.vendor_name.toLowerCase().includes(vendor.toLowerCase()));
+    if (startDate && endDate) {
+      bills = bills.filter(bill => {
+        const billDate = new Date(bill.bill_date);
+        return billDate >= new Date(startDate) && billDate <= new Date(endDate);
+      });
+    }
+    
+    const startIndex = (page - 1) * limit;
+    const paginatedBills = bills.slice(startIndex, startIndex + parseInt(limit));
+    
+    res.json({
+      bills: paginatedBills,
+      total: bills.length,
+      page: parseInt(page),
+      totalPages: Math.ceil(bills.length / limit)
+    });
+  } catch (error) {
+    console.error('Get bills list error:', error);
+    res.status(500).json({ message: 'Failed to fetch bills' });
+  }
+});
+
+// Bulk operations
+router.post('/bulk-approve', authenticateToken, auditLog('BULK_APPROVE_BILLS'), async (req, res) => {
+  try {
+    const { billIds } = req.body;
+    const results = [];
+    
+    for (const billId of billIds) {
+      try {
+        const updatedBill = await airtableHelpers.update(TABLES.BILLS, billId, {
+          status: 'approved',
+          approved_at: new Date().toISOString(),
+          approved_by: [req.user.id]
+        });
+        results.push({ billId, success: true, bill: updatedBill });
+      } catch (error) {
+        results.push({ billId, success: false, error: error.message });
+      }
+    }
+    
+    res.json({ results });
+  } catch (error) {
+    console.error('Bulk approve error:', error);
+    res.status(500).json({ message: 'Failed to bulk approve bills' });
+  }
+});
+
 // Get all bills
 router.get('/', authenticateToken, authorizeRoles(['admin', 'manager', 'boss']), async (req, res) => {
   try {

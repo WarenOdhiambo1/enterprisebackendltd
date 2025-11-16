@@ -18,6 +18,9 @@ const purchaseReceivesRoutes = require('./routes/purchase-receives');
 const billsRoutes = require('./routes/bills');
 const inventoryAdjustmentsRoutes = require('./routes/inventory-adjustments');
 const logisticsTransactionsRoutes = require('./routes/logistics-transactions');
+const packagesRoutes = require('./routes/packages');
+const paymentsRoutes = require('./routes/payments');
+const vendorCreditsRoutes = require('./routes/vendor-credits');
 const debugRoutes = require('./routes/debug');
 const { authenticateToken, authorizeRoles } = require('./middleware/auth');
 
@@ -131,6 +134,12 @@ app.use('/api/inventory-adjustments', authenticateToken, inventoryAdjustmentsRou
 console.log('Inventory adjustments routes mounted');
 app.use('/api/logistics-transactions', authenticateToken, logisticsTransactionsRoutes);
 console.log('Logistics transactions routes mounted');
+app.use('/api/packages', authenticateToken, packagesRoutes);
+console.log('Packages routes mounted');
+app.use('/api/payments', authenticateToken, paymentsRoutes);
+console.log('Payments routes mounted');
+app.use('/api/vendor-credits', authenticateToken, vendorCreditsRoutes);
+console.log('Vendor credits routes mounted');
 app.use('/api/debug', debugRoutes);
 console.log('Debug routes mounted');
 console.log('All routes mounted successfully');

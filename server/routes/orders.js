@@ -16,7 +16,7 @@ const csrfProtection = (req, res, next) => {
 
 const router = express.Router();
 
-// Get all orders
+// Order Processing Flow Architecture - Get all orders with complete lifecycle
 router.get('/', authenticateToken, authorizeRoles(['admin', 'manager', 'boss']), async (req, res) => {
   try {
     const { status, startDate, endDate } = req.query;
@@ -34,31 +34,21 @@ router.get('/', authenticateToken, authorizeRoles(['admin', 'manager', 'boss']),
     const orders = await airtableHelpers.find(TABLES.ORDERS, filterFormula);
     
     // Get order items from ORDER_ITEMS table with multiple approaches
+    // Enrich orders with complete lifecycle data
     const ordersWithItems = await Promise.all(
       orders.map(async (order) => {
-        let items = [];
-        try {
-          // Try primary approach
-          items = await airtableHelpers.find(
-            TABLES.ORDER_ITEMS,
-            `{order_id} = "${order.id}"`
-          );
-        } catch (error) {
-          console.log(`Failed to find items for order ${order.id} with filter, trying alternative`);
-          try {
-            // Try alternative approach - get all items and filter manually
-            const allItems = await airtableHelpers.find(TABLES.ORDER_ITEMS);
-            items = allItems.filter(item => 
-              item.order_id && (
-                (Array.isArray(item.order_id) && item.order_id.includes(order.id)) ||
-                item.order_id === order.id
-              )
-            );
-          } catch (altError) {
-            console.log(`Alternative approach also failed for order ${order.id}:`, altError.message);
-          }
-        }
-        return { ...order, items };
+        const [items, receives, bills, payments] = await Promise.all([
+          // Order items
+          airtableHelpers.find(TABLES.ORDER_ITEMS, `{order_id} = "${order.id}"`).catch(() => []),
+          // Purchase receives
+          airtableHelpers.find(TABLES.PURCHASE_RECEIVES, `{purchase_order_id} = "${order.id}"`).catch(() => []),
+          // Bills
+          airtableHelpers.find(TABLES.BILLS, `{purchase_order_id} = "${order.id}"`).catch(() => []),
+          // Payments
+          airtableHelpers.find(TABLES.PAYMENTS_MADE, `{order_id} = "${order.id}"`).catch(() => [])
+        ]);
+        
+        return { ...order, items, receives, bills, payments };
       })
     );
 
@@ -100,7 +90,7 @@ router.get('/debug/:orderId', authenticateToken, authorizeRoles(['admin', 'manag
   }
 });
 
-// Create new order
+// Create order with complete workflow (Phase 1: Order Creation)
 router.post('/', authenticateToken, authorizeRoles(['admin', 'manager', 'boss']), auditLog('CREATE_ORDER'), async (req, res) => {
   try {
     const {
@@ -128,14 +118,18 @@ router.post('/', authenticateToken, authorizeRoles(['admin', 'manager', 'boss'])
       return sum + (item.quantity_ordered * item.purchase_price_per_unit);
     }, 0);
 
-    // Create order
+    // Create order with complete workflow fields
     const orderData = {
       supplier_name,
       order_date,
+      expected_delivery_date,
       total_amount: totalAmount,
       amount_paid: 0,
       balance_remaining: totalAmount,
-      status: 'ordered'
+      status: 'ordered',
+      approval_status: 'draft',
+      created_by: req.user?.id ? [req.user.id] : [],
+      created_at: new Date().toISOString()
     };
     
     if (expected_delivery_date) {
@@ -172,7 +166,45 @@ router.post('/', authenticateToken, authorizeRoles(['admin', 'manager', 'boss'])
   }
 });
 
-// Record payment for order
+// Approve order (Phase 1: Approval Workflow)
+router.put('/:orderId/approve', authenticateToken, authorizeRoles(['admin', 'manager', 'boss']), async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    
+    const updatedOrder = await airtableHelpers.update(TABLES.ORDERS, orderId, {
+      approval_status: 'approved',
+      approved_by: req.user?.id ? [req.user.id] : [],
+      approved_at: new Date().toISOString()
+    });
+    
+    res.json({ success: true, order: updatedOrder });
+  } catch (error) {
+    console.error('Approve order error:', error);
+    res.status(500).json({ message: 'Failed to approve order' });
+  }
+});
+
+// Reject order (Phase 1: Approval Workflow)
+router.put('/:orderId/reject', authenticateToken, authorizeRoles(['admin', 'manager', 'boss']), async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { rejection_reason } = req.body;
+    
+    const updatedOrder = await airtableHelpers.update(TABLES.ORDERS, orderId, {
+      approval_status: 'rejected',
+      approved_by: req.user?.id ? [req.user.id] : [],
+      approved_at: new Date().toISOString(),
+      rejection_reason: rejection_reason || 'No reason provided'
+    });
+    
+    res.json({ success: true, order: updatedOrder });
+  } catch (error) {
+    console.error('Reject order error:', error);
+    res.status(500).json({ message: 'Failed to reject order' });
+  }
+});
+
+// Record payment for order (Phase 2: Payment Processing)
 router.post('/:orderId/payment', authenticateToken, authorizeRoles(['admin', 'manager', 'boss']), auditLog('RECORD_PAYMENT'), async (req, res) => {
   try {
     const { orderId } = req.params;
@@ -203,6 +235,23 @@ router.post('/:orderId/payment', authenticateToken, authorizeRoles(['admin', 'ma
       status: newStatus
     });
 
+    // Create payment record in PAYMENTS_MADE table
+    try {
+      await airtableHelpers.create(TABLES.PAYMENTS_MADE, {
+        order_id: [orderId],
+        vendor_name: order.supplier_name,
+        amount: parseFloat(amount),
+        payment_date: new Date().toISOString().split('T')[0],
+        payment_method: req.body.payment_method || 'cash',
+        reference_number: req.body.reference_number || '',
+        status: 'completed',
+        created_by: req.user?.id ? [req.user.id] : [],
+        created_at: new Date().toISOString()
+      });
+    } catch (paymentError) {
+      console.log('Payment record creation skipped:', paymentError.message);
+    }
+
     res.json(updatedOrder);
   } catch (error) {
     console.error('Record payment error:', error);
@@ -210,7 +259,51 @@ router.post('/:orderId/payment', authenticateToken, authorizeRoles(['admin', 'ma
   }
 });
 
-// Mark items as delivered
+// Create purchase receive (Phase 3: Goods Receiving)
+router.post('/:orderId/receive', authenticateToken, authorizeRoles(['admin', 'manager', 'boss']), async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { receiving_branch_id, received_items, notes } = req.body;
+    
+    const receiveData = {
+      purchase_order_id: [orderId],
+      receiving_branch_id: [receiving_branch_id],
+      receive_date: new Date().toISOString().split('T')[0],
+      received_by: req.user?.fullName || 'System',
+      status: 'received',
+      total_items: received_items.length,
+      total_quantity_received: received_items.reduce((sum, item) => sum + item.quantity_received, 0),
+      receive_status: 'complete',
+      notes: notes || '',
+      created_by: req.user?.id ? [req.user.id] : [],
+      created_at: new Date().toISOString()
+    };
+    
+    const purchaseReceive = await airtableHelpers.create(TABLES.PURCHASE_RECEIVES, receiveData);
+    
+    const receiveItems = [];
+    for (const item of received_items) {
+      const receiveItem = await airtableHelpers.create(TABLES.RECEIVE_ITEMS, {
+        receive_id: [purchaseReceive.id],
+        product_name: item.product_name,
+        quantity_ordered: item.quantity_ordered,
+        quantity_received: item.quantity_received,
+        unit_cost: item.unit_cost,
+        total_cost: item.quantity_received * item.unit_cost,
+        condition: item.condition || 'good'
+      });
+      receiveItems.push(receiveItem);
+    }
+    
+    await airtableHelpers.update(TABLES.ORDERS, orderId, { status: 'delivered' });
+    res.json({ success: true, receive: purchaseReceive, items: receiveItems });
+  } catch (error) {
+    console.error('Create receive error:', error);
+    res.status(500).json({ message: 'Failed to create receive record' });
+  }
+});
+
+// Mark items as delivered (Legacy)
 router.post('/:orderId/delivery', authenticateToken, authorizeRoles(['admin', 'manager', 'boss']), auditLog('MARK_DELIVERED'), async (req, res) => {
   try {
     const { orderId } = req.params;
