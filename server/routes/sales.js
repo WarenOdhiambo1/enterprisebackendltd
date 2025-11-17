@@ -79,7 +79,7 @@ router.get('/branch/:branchId', async (req, res) => {
 
 router.post('/', async (req, res) => {
   try {
-    const { items, branchId, customer_name, payment_method, sale_date } = req.body;
+    const { items, branchId, sale_date } = req.body;
 
     if (!items || items.length === 0 || !branchId) {
       return res.status(400).json({ message: 'Items and branch ID are required' });
@@ -90,13 +90,11 @@ router.post('/', async (req, res) => {
       return sum + (Number(item.quantity) * Number(item.unit_price));
     }, 0);
     
-    // Create sale
+    // Create sale with minimal fields
     const salesData = {
       branch_id: [branchId],
       total_amount: saleTotal,
-      sale_date: sale_date || new Date().toISOString().split('T')[0],
-      customer_name: customer_name || 'Walk-in Customer',
-      payment_method: payment_method || 'cash'
+      sale_date: sale_date || new Date().toISOString().split('T')[0]
     };
     
     const newSale = await airtableHelpers.create(TABLES.SALES, salesData);
