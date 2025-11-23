@@ -164,40 +164,31 @@ router.get('/employees/:id', authenticateToken, authorizeRoles(['hr', 'admin', '
 // Create employee with complete profile
 router.post('/employees', async (req, res) => {
   try {
-    const { full_name, email, role, branch_id, phone, salary } = req.body;
+    const { full_name, email, role, branch_id, phone, salary, password } = req.body;
     
-    console.log('Creating employee with data:', { full_name, email, role, branch_id, phone, salary });
-    
-    // Use only essential fields that definitely exist in Airtable
     const employeeData = {
       full_name: full_name || 'Unknown',
       email: email || '',
       role: role || 'employee',
-      is_active: true
+      is_active: true,
+      hire_date: new Date().toISOString().split('T')[0]
     };
     
-    // Add optional fields only if provided
+    // Add password hash if password provided
+    if (password) {
+      employeeData.password_hash = await bcrypt.hash(password, 10);
+    }
+    
+    // Add optional fields
     if (phone) employeeData.phone = phone;
     if (salary) employeeData.salary = parseFloat(salary);
     if (branch_id) employeeData.branch_id = [branch_id];
     
-    console.log('Final employee data:', employeeData);
-    
     const newEmployee = await airtableHelpers.create(TABLES.EMPLOYEES, employeeData);
-    console.log('Employee created successfully:', newEmployee.id);
-    
     res.status(201).json(newEmployee);
   } catch (error) {
-    console.error('Create employee error details:', {
-      message: error.message,
-      stack: error.stack,
-      requestBody: req.body
-    });
-    res.status(500).json({ 
-      message: 'Failed to create employee', 
-      error: error.message,
-      details: error.stack
-    });
+    console.error('Create employee error:', error);
+    res.status(500).json({ message: 'Failed to create employee', error: error.message });
   }
 });
 
