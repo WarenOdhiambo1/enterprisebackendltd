@@ -24,8 +24,8 @@ const authenticateToken = async (req, res, next) => {
       id: decoded.userId,
       email: user.email,
       role: user.role,
-      branchId: user.branch_id,
-      fullName: user.full_name
+      branch_id: Array.isArray(user.branch_id) ? user.branch_id[0] : user.branch_id,
+      fullName: user.name || user.full_name
     };
 
     next();
