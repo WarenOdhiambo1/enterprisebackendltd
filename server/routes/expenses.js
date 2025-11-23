@@ -450,35 +450,11 @@ router.get('/analytics', async (req, res) => {
   }
 });
 
-// Validation middleware for expense creation
-const validateExpense = [
-  body('expense_date').optional().isISO8601().withMessage('Valid expense date required'),
-  body('branch_id').optional().notEmpty().withMessage('Branch ID required'),
-  body('category').optional().isIn(['fuel', 'maintenance', 'utilities', 'vehicle_related', 'rent', 'office_supplies', 'travel', 'marketing', 'insurance', 'other']).withMessage('Invalid category'),
-  body('amount').optional().isFloat({ min: 0.01 }).withMessage('Amount must be positive'),
-  body('description').optional().isLength({ max: 1000 }).withMessage('Description too long'),
-  body('vehicle_id').optional().notEmpty(),
-  body('recorded_by').optional().notEmpty().withMessage('Recorded by required')
-];
+
 
 // 1. Create New Expense
-router.post('/', validateExpense, async (req, res) => {
+router.post('/', async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        success: false,
-        error: {
-          code: 'VALIDATION_ERROR',
-          message: 'Invalid expense data',
-          details: errors.array().map(err => ({
-            field: err.path,
-            message: err.msg
-          }))
-        }
-      });
-    }
-    
     const {
       expense_date,
       branch_id,
@@ -489,38 +465,31 @@ router.post('/', validateExpense, async (req, res) => {
       recorded_by
     } = req.body;
     
-    // Skip validation for now to prevent 400 errors
-    
     const expenseData = {
       expense_date: expense_date || new Date().toISOString().split('T')[0],
-      branch_id: branch_id ? [branch_id] : [],
       category: category || 'other',
       amount: parseFloat(amount) || 0,
       description: description || '',
-      recorded_by: recorded_by ? [recorded_by] : [],
       created_at: new Date().toISOString()
     };
     
+    // Add optional fields only if they exist
+    if (branch_id) {
+      expenseData.branch_id = Array.isArray(branch_id) ? branch_id : [branch_id];
+    }
     if (vehicle_id) {
-      expenseData.vehicle_id = [vehicle_id];
+      expenseData.vehicle_id = Array.isArray(vehicle_id) ? vehicle_id : [vehicle_id];
+    }
+    if (recorded_by) {
+      expenseData.recorded_by = Array.isArray(recorded_by) ? recorded_by : [recorded_by];
     }
     
     const newExpense = await airtableHelpers.create(TABLES.EXPENSES, expenseData);
     
-    res.status(201).json({
-      success: true,
-      message: 'Expense created successfully',
-      data: newExpense
-    });
+    res.status(201).json(newExpense);
   } catch (error) {
     console.error('Create expense error:', error);
-    res.status(500).json({
-      success: false,
-      error: {
-        code: 'CREATE_ERROR',
-        message: 'Failed to create expense'
-      }
-    });
+    res.status(500).json({ message: 'Failed to create expense', error: error.message });
   }
 });
 
