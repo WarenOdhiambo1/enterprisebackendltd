@@ -184,9 +184,10 @@ router.post('/transfer', authenticateToken, async (req, res) => {
     
     // Add fields conditionally based on what exists
     if (product_id) movementData.product_id = product_id;
-    if (from_branch_id) movementData.from_branch_id = from_branch_id;
-    if (to_branch_id) movementData.to_branch_id = to_branch_id;
+    if (from_branch_id) movementData.from_branch_id = [from_branch_id];
+    if (to_branch_id) movementData.to_branch_id = [to_branch_id];
     if (reason) movementData.reason = reason;
+    movementData.transfer_date = new Date().toISOString().split('T')[0];
     
     const movement = await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, movementData);
     
