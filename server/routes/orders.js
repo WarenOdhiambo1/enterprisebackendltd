@@ -67,7 +67,7 @@ router.get('/', authenticateToken, authorizeRoles(['admin', 'manager', 'boss']),
 });
 
 // Get all order items
-router.get('/items', authenticateToken, authorizeRoles(['admin', 'manager', 'boss']), async (req, res) => {
+router.get('/items', authenticateToken, async (req, res) => {
   try {
     const orderItems = await airtableHelpers.find(TABLES.ORDER_ITEMS);
     res.json(orderItems);
@@ -78,7 +78,7 @@ router.get('/items', authenticateToken, authorizeRoles(['admin', 'manager', 'bos
 });
 
 // Debug endpoint to check order items
-router.get('/debug/:orderId', authenticateToken, authorizeRoles(['admin', 'manager', 'boss']), async (req, res) => {
+router.get('/debug/:orderId', authenticateToken, async (req, res) => {
   try {
     const { orderId } = req.params;
     
