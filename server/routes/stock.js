@@ -86,18 +86,39 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ message: 'Branch ID is required' });
     }
 
-    const stockData = {
-      branch_id: [targetBranchId],
-      product_id: product_id || `PRD_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-      product_name: product_name.trim(),
-      quantity_available: parseInt(quantity_available),
-      unit_price: parseFloat(unit_price),
-      reorder_level: parseInt(reorder_level) || 10,
-      last_updated: new Date().toISOString()
-    };
+    const finalProductId = product_id || `PRD_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+    
+    // Check if product already exists in this branch
+    const allStock = await airtableHelpers.find(TABLES.STOCK);
+    const existingStock = allStock.find(item => 
+      item.branch_id && item.branch_id.includes(targetBranchId) && 
+      (item.product_id === finalProductId || item.product_name === product_name.trim())
+    );
 
-    const newStock = await airtableHelpers.create(TABLES.STOCK, stockData);
-    res.status(201).json(newStock);
+    if (existingStock) {
+      // Update existing stock quantity
+      const newQuantity = existingStock.quantity_available + parseInt(quantity_available);
+      const updatedStock = await airtableHelpers.update(TABLES.STOCK, existingStock.id, {
+        quantity_available: newQuantity,
+        unit_price: parseFloat(unit_price),
+        last_updated: new Date().toISOString()
+      });
+      res.json({ ...updatedStock, message: 'Stock quantity updated' });
+    } else {
+      // Create new stock record
+      const stockData = {
+        branch_id: [targetBranchId],
+        product_id: finalProductId,
+        product_name: product_name.trim(),
+        quantity_available: parseInt(quantity_available),
+        unit_price: parseFloat(unit_price),
+        reorder_level: parseInt(reorder_level) || 10,
+        last_updated: new Date().toISOString()
+      };
+
+      const newStock = await airtableHelpers.create(TABLES.STOCK, stockData);
+      res.status(201).json({ ...newStock, message: 'New stock created' });
+    }
   } catch (error) {
     console.error('Add stock error:', error);
     res.status(500).json({ message: 'Failed to add stock', error: error.message });
