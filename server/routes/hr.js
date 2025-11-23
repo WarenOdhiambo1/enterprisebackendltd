@@ -162,7 +162,7 @@ router.get('/employees/:id', authenticateToken, authorizeRoles(['hr', 'admin', '
 });
 
 // Create employee with complete profile
-router.post('/employees', authenticateToken, authorizeRoles(['hr', 'admin', 'boss']), async (req, res) => {
+router.post('/employees', authenticateToken, async (req, res) => {
   try {
     const { 
       full_name, 
@@ -172,25 +172,16 @@ router.post('/employees', authenticateToken, authorizeRoles(['hr', 'admin', 'bos
       branch_id, 
       hire_date, 
       salary, 
-      password,
-      mfa_enabled = false 
+      password
     } = req.body;
     
     // Validate required fields
-    if (!full_name || !email || !role || !password) {
-      return res.status(400).json({ message: 'Full name, email, role, and password are required' });
+    if (!full_name || !email || !role) {
+      return res.status(400).json({ message: 'Full name, email, and role are required' });
     }
-    
-    // Check email uniqueness
-    const existingEmployees = await airtableHelpers.find(TABLES.EMPLOYEES);
-    if (existingEmployees.some(e => e.email === email)) {
-      return res.status(400).json({ message: 'Email already exists' });
-    }
-    
-    // Hash password
-    const password_hash = await bcrypt.hash(password, 10);
     
     const employeeData = {
+      name: full_name,
       full_name,
       email,
       phone: phone || '',
@@ -198,17 +189,20 @@ router.post('/employees', authenticateToken, authorizeRoles(['hr', 'admin', 'bos
       branch_id: branch_id ? [branch_id] : [],
       hire_date: hire_date || new Date().toISOString().split('T')[0],
       salary: parseFloat(salary) || 0,
-      password_hash,
-      mfa_enabled,
       is_active: true,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
+      created_at: new Date().toISOString()
     };
+    
+    if (password) {
+      employeeData.password_hash = await bcrypt.hash(password, 10);
+    }
     
     const newEmployee = await airtableHelpers.create(TABLES.EMPLOYEES, employeeData);
     
     // Remove password hash from response
-    delete newEmployee.password_hash;
+    if (newEmployee.password_hash) {
+      delete newEmployee.password_hash;
+    }
     
     res.status(201).json(newEmployee);
   } catch (error) {
