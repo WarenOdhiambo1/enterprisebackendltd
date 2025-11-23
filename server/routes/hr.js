@@ -167,7 +167,6 @@ router.post('/employees', async (req, res) => {
     const { full_name, email, role, branch_id, phone, salary } = req.body;
     
     const employeeData = {
-      name: full_name,
       full_name: full_name,
       email: email,
       phone: phone || '',
