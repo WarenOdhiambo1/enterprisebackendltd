@@ -27,7 +27,8 @@ router.get('/check-movements', async (req, res) => {
       success: true, 
       recordCount: movements.length,
       availableFields: fields,
-      sampleRecord: movements[0] || null
+      sampleRecord: movements[0] || null,
+      allRecords: movements
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -341,12 +342,18 @@ router.get('/transfers/pending/:branchId', async (req, res) => {
   try {
     const { branchId } = req.params;
     
+    // Get all transfers for this branch (since we can't filter by status)
     let filterFormula = '';
     if (branchId !== 'all') {
       filterFormula = `{to_branch_id} = "${branchId}"`;
     }
     
-    const pendingTransfers = await airtableHelpers.find(TABLES.STOCK_MOVEMENTS, filterFormula);
+    const allTransfers = await airtableHelpers.find(TABLES.STOCK_MOVEMENTS, filterFormula);
+    
+    // Filter out transfers that have been approved (have approved_by field)
+    const pendingTransfers = allTransfers.filter(transfer => !transfer.approved_by);
+    
+    console.log(`Found ${pendingTransfers.length} pending transfers for branch ${branchId}`);
     res.json(pendingTransfers);
   } catch (error) {
     console.error('Get pending transfers error:', error);
