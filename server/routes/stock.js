@@ -410,69 +410,68 @@ router.put('/transfers/:transferId/approve', authenticateToken, async (req, res)
       return res.status(404).json({ message: 'Transfer not found' });
     }
     
-    const processedItems = [];
+    // Update transfer with approval info
+    await airtableHelpers.update(TABLES.STOCK_MOVEMENTS, transferId, {
+      approved_by: [req.user.id],
+      approved_at: new Date().toISOString()
+    });
     
-    // Process each movement
-    for (const movement of movements) {
-      // Reduce stock from source branch
+    // Update stock quantities
+    const { from_branch_id, to_branch_id, product_id, quantity } = transfer;
+    
+    // Reduce stock from source branch
+    if (from_branch_id && from_branch_id[0]) {
       const sourceStock = await airtableHelpers.find(
         TABLES.STOCK,
-        `AND({branch_id} = "${movement.from_branch_id[0]}", {product_id} = "${movement.product_id}")`
+        `AND({branch_id} = "${from_branch_id[0]}", {product_id} = "${product_id}")`
       );
       
       if (sourceStock.length > 0) {
-        const newSourceQuantity = sourceStock[0].quantity_available - movement.quantity;
+        const newQuantity = Math.max(0, sourceStock[0].quantity_available - quantity);
         await airtableHelpers.update(TABLES.STOCK, sourceStock[0].id, {
-          quantity_available: Math.max(0, newSourceQuantity),
+          quantity_available: newQuantity,
           last_updated: new Date().toISOString()
         });
       }
-      
-      // Add stock to destination branch
+    }
+    
+    // Add stock to destination branch
+    if (to_branch_id && to_branch_id[0]) {
       const destStock = await airtableHelpers.find(
         TABLES.STOCK,
-        `AND({branch_id} = "${movement.to_branch_id[0]}", {product_name} = "${movement.product_name}")`
+        `AND({branch_id} = "${to_branch_id[0]}", {product_id} = "${product_id}")`
       );
       
       if (destStock.length > 0) {
         // Update existing stock
-        const newDestQuantity = destStock[0].quantity_available + movement.quantity;
+        const newQuantity = destStock[0].quantity_available + quantity;
         await airtableHelpers.update(TABLES.STOCK, destStock[0].id, {
-          quantity_available: newDestQuantity,
+          quantity_available: newQuantity,
           last_updated: new Date().toISOString()
         });
       } else {
-        // Create new stock entry
-        await airtableHelpers.create(TABLES.STOCK, {
-          branch_id: [movement.to_branch_id[0]],
-          product_id: movement.product_id,
-          product_name: movement.product_name,
-          quantity_available: movement.quantity,
-          unit_price: movement.unit_cost,
-          reorder_level: 10,
-          last_updated: new Date().toISOString()
-        });
+        // Get source stock info for creating new record
+        const sourceStockInfo = await airtableHelpers.find(
+          TABLES.STOCK,
+          `AND({branch_id} = "${from_branch_id[0]}", {product_id} = "${product_id}")`
+        );
+        
+        if (sourceStockInfo.length > 0) {
+          await airtableHelpers.create(TABLES.STOCK, {
+            branch_id: [to_branch_id[0]],
+            product_id: product_id,
+            product_name: sourceStockInfo[0].product_name,
+            quantity_available: quantity,
+            unit_price: sourceStockInfo[0].unit_price || 0,
+            reorder_level: sourceStockInfo[0].reorder_level || 10,
+            last_updated: new Date().toISOString()
+          });
+        }
       }
-      
-      // Update movement status
-      await airtableHelpers.update(TABLES.STOCK_MOVEMENTS, movement.id, {
-        status: 'completed',
-        approved_by: [req.user.id],
-        approved_at: new Date().toISOString()
-      });
-      
-      processedItems.push({
-        productName: movement.product_name,
-        quantity: movement.quantity,
-        status: 'completed'
-      });
     }
     
-    res.json({
-      success: true,
-      message: `Transfer ${transferId} approved successfully`,
-      processedItems
-    });
+    res.json({ success: true, message: 'Transfer approved and stock updated' });
+
   } catch (error) {
     console.error('Approve transfer error:', error);
     res.status(500).json({ message: 'Failed to approve transfer' });
