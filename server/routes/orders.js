@@ -67,13 +67,90 @@ router.get('/', authenticateToken, authorizeRoles(['admin', 'manager', 'boss']),
 });
 
 // Get all order items
-router.get('/items', authenticateToken, async (req, res) => {
+router.get('/items', async (req, res) => {
   try {
     const orderItems = await airtableHelpers.find(TABLES.ORDER_ITEMS);
-    res.json(orderItems);
+    const orders = await airtableHelpers.find(TABLES.ORDERS);
+    const branches = await airtableHelpers.find(TABLES.BRANCHES);
+    
+    const branchMap = branches.reduce((acc, branch) => {
+      acc[branch.id] = branch.branch_name || branch.name;
+      return acc;
+    }, {});
+    
+    const orderMap = orders.reduce((acc, order) => {
+      acc[order.id] = order;
+      return acc;
+    }, {});
+    
+    const enrichedItems = orderItems.map(item => {
+      const orderId = Array.isArray(item.order_id) ? item.order_id[0] : item.order_id;
+      const branchId = Array.isArray(item.branch_destination_id) ? item.branch_destination_id[0] : item.branch_destination_id;
+      const order = orderMap[orderId];
+      
+      return {
+        ...item,
+        order_info: order,
+        destination_branch_name: branchMap[branchId] || 'Unknown',
+        remaining_quantity: (item.quantity_ordered || 0) - (item.quantity_received || 0),
+        progress: item.quantity_ordered > 0 ? Math.round(((item.quantity_received || 0) / item.quantity_ordered) * 100) : 0
+      };
+    });
+    
+    res.json(enrichedItems);
   } catch (error) {
     console.error('Get order items error:', error);
     res.status(500).json({ message: 'Failed to fetch order items' });
+  }
+});
+
+// Get order tracking data
+router.get('/tracking', async (req, res) => {
+  try {
+    const orderItems = await airtableHelpers.find(TABLES.ORDER_ITEMS);
+    const orders = await airtableHelpers.find(TABLES.ORDERS);
+    const branches = await airtableHelpers.find(TABLES.BRANCHES);
+    
+    const branchMap = branches.reduce((acc, branch) => {
+      acc[branch.id] = branch.branch_name || branch.name;
+      return acc;
+    }, {});
+    
+    const orderMap = orders.reduce((acc, order) => {
+      acc[order.id] = order;
+      return acc;
+    }, {});
+    
+    const trackingData = orderItems.map(item => {
+      const orderId = Array.isArray(item.order_id) ? item.order_id[0] : item.order_id;
+      const branchId = Array.isArray(item.branch_destination_id) ? item.branch_destination_id[0] : item.branch_destination_id;
+      const order = orderMap[orderId];
+      const ordered = item.quantity_ordered || 0;
+      const completed = item.quantity_received || 0;
+      const remaining = ordered - completed;
+      const progress = ordered > 0 ? Math.round((completed / ordered) * 100) : 0;
+      
+      return {
+        id: item.id,
+        order_id: orderId,
+        order_number: order?.order_number || orderId,
+        supplier_name: order?.supplier_name || 'Unknown',
+        product_name: item.product_name,
+        quantity_ordered: ordered,
+        quantity_completed: completed,
+        quantity_remaining: remaining,
+        destination_branch: branchMap[branchId] || 'Unknown',
+        progress_percentage: progress,
+        status: remaining === 0 ? 'Completed' : remaining < ordered ? 'Partial' : 'Pending',
+        order_date: order?.order_date,
+        expected_delivery: order?.expected_delivery_date
+      };
+    }).filter(item => item.quantity_ordered > 0);
+    
+    res.json(trackingData);
+  } catch (error) {
+    console.error('Get tracking data error:', error);
+    res.status(500).json({ message: 'Failed to fetch tracking data' });
   }
 });
 
