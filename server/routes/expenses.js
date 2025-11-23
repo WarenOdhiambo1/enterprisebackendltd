@@ -133,24 +133,22 @@ const populateExpense = async (expense) => {
 router.get('/', async (req, res) => {
   try {
     const { 
-      branch_id, 
+      branchId, 
       category, 
-      date_from, 
-      date_to, 
+      startDate, 
+      endDate, 
       vehicle_id,
       recorded_by, 
-      limit = 20, 
-      offset = 0,
-      sort_by = 'expense_date',
-      sort_order = 'desc'
+      limit = 50, 
+      offset = 0
     } = req.query;
     
     let expenses = await airtableHelpers.find(TABLES.EXPENSES);
     
     // Apply filters
-    if (branch_id) {
+    if (branchId) {
       expenses = expenses.filter(expense => 
-        expense.branch_id && expense.branch_id.includes(branch_id)
+        expense.branch_id && expense.branch_id.includes(branchId)
       );
     }
     
@@ -158,69 +156,25 @@ router.get('/', async (req, res) => {
       expenses = expenses.filter(expense => expense.category === category);
     }
     
-    if (date_from) {
+    if (startDate) {
       expenses = expenses.filter(expense => 
-        expense.expense_date >= date_from
+        expense.expense_date >= startDate
       );
     }
     
-    if (date_to) {
+    if (endDate) {
       expenses = expenses.filter(expense => 
-        expense.expense_date <= date_to
+        expense.expense_date <= endDate
       );
     }
     
-    if (vehicle_id) {
-      expenses = expenses.filter(expense => 
-        expense.vehicle_id && expense.vehicle_id.includes(vehicle_id)
-      );
-    }
+    // Sort by date descending
+    expenses.sort((a, b) => new Date(b.expense_date) - new Date(a.expense_date));
     
-    if (recorded_by) {
-      expenses = expenses.filter(expense => 
-        expense.recorded_by && expense.recorded_by.includes(recorded_by)
-      );
-    }
-    
-    // Sort expenses
-    expenses.sort((a, b) => {
-      const aVal = a[sort_by];
-      const bVal = b[sort_by];
-      if (sort_order === 'asc') {
-        return aVal > bVal ? 1 : -1;
-      } else {
-        return aVal < bVal ? 1 : -1;
-      }
-    });
-    
-    // Pagination
-    const total = expenses.length;
-    const paginatedExpenses = expenses.slice(parseInt(offset), parseInt(offset) + parseInt(limit));
-    
-    // Populate related data
-    const populatedExpenses = await Promise.all(
-      paginatedExpenses.map(expense => populateExpense(expense))
-    );
-    
-    res.json({
-      success: true,
-      data: populatedExpenses,
-      pagination: {
-        total,
-        page: Math.floor(parseInt(offset) / parseInt(limit)) + 1,
-        per_page: parseInt(limit),
-        total_pages: Math.ceil(total / parseInt(limit))
-      }
-    });
+    res.json(expenses);
   } catch (error) {
     console.error('Get expenses error:', error);
-    res.status(500).json({ 
-      success: false,
-      error: {
-        code: 'FETCH_ERROR',
-        message: 'Failed to fetch expenses'
-      }
-    });
+    res.status(500).json({ message: 'Failed to fetch expenses' });
   }
 });
 
@@ -494,6 +448,50 @@ router.post('/', async (req, res) => {
 });
 
 // Legacy direct expenses endpoints for backward compatibility
+// Get expense summary
+router.get('/summary', async (req, res) => {
+  try {
+    const { branchId, startDate, endDate } = req.query;
+    
+    let expenses = await airtableHelpers.find(TABLES.EXPENSES);
+    
+    // Apply filters
+    if (branchId) {
+      expenses = expenses.filter(expense => 
+        expense.branch_id && expense.branch_id.includes(branchId)
+      );
+    }
+    
+    if (startDate) {
+      expenses = expenses.filter(expense => expense.expense_date >= startDate);
+    }
+    
+    if (endDate) {
+      expenses = expenses.filter(expense => expense.expense_date <= endDate);
+    }
+    
+    // Group by category
+    const categoryTotals = expenses.reduce((acc, expense) => {
+      const category = expense.category || 'other';
+      if (!acc[category]) {
+        acc[category] = { category, total_amount: 0, count: 0 };
+      }
+      acc[category].total_amount += parseFloat(expense.amount) || 0;
+      acc[category].count += 1;
+      return acc;
+    }, {});
+    
+    res.json({
+      summary: Object.values(categoryTotals),
+      total_expenses: expenses.reduce((sum, exp) => sum + (parseFloat(exp.amount) || 0), 0),
+      total_count: expenses.length
+    });
+  } catch (error) {
+    console.error('Get expense summary error:', error);
+    res.status(500).json({ message: 'Failed to fetch expense summary' });
+  }
+});
+
 router.get('/direct', authenticateToken, async (req, res) => {
   try {
     const { category, branchId, startDate, endDate, page = 1, limit = 50 } = req.query;
