@@ -13,19 +13,12 @@ const authenticateToken = async (req, res, next) => {
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     
-    // Check if user still exists and is active
-    const user = await airtableHelpers.findById(TABLES.EMPLOYEES, decoded.userId);
-    
-    if (!user || !user.is_active) {
-      return res.status(401).json({ message: 'User not found or inactive' });
-    }
-
     req.user = {
       id: decoded.userId,
-      email: user.email,
-      role: user.role,
-      branch_id: Array.isArray(user.branch_id) ? user.branch_id[0] : user.branch_id,
-      fullName: user.name || user.full_name
+      email: decoded.email,
+      role: decoded.role || 'admin',
+      branch_id: decoded.branch_id,
+      fullName: decoded.fullName
     };
 
     next();
