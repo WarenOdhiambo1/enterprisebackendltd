@@ -581,6 +581,32 @@ router.delete('/direct/:expenseId', authenticateToken, auditLog('DELETE_EXPENSE'
   }
 });
 
+// Update expense
+router.put('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updateData = { ...req.body };
+    
+    const updatedExpense = await airtableHelpers.update(TABLES.EXPENSES, id, updateData);
+    res.json(updatedExpense);
+  } catch (error) {
+    console.error('Update expense error:', error);
+    res.status(500).json({ message: 'Failed to update expense' });
+  }
+});
+
+// Delete expense
+router.delete('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await airtableHelpers.delete(TABLES.EXPENSES, id);
+    res.json({ message: 'Expense deleted successfully' });
+  } catch (error) {
+    console.error('Delete expense error:', error);
+    res.status(500).json({ message: 'Failed to delete expense' });
+  }
+});
+
 // 2. Bulk Create Expenses
 router.post('/bulk', async (req, res) => {
   try {
