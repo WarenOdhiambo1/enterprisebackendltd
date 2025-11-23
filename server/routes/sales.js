@@ -107,12 +107,15 @@ router.post('/', async (req, res) => {
     // Get stock for reduction
     const allStock = await airtableHelpers.find(TABLES.STOCK);
     
-    // Create sale items and reduce stock
+    // Aggregate quantities by product name
+    const productTotals = {};
+    
+    // Create sale items and calculate totals
     const saleItems = [];
     for (const item of items) {
       if (!item.quantity || !item.unit_price || !item.product_name) continue;
       
-      // Create sale item with correct field names
+      // Create sale item
       const saleItem = await airtableHelpers.create(TABLES.SALE_ITEMS, {
         sale_id: [newSale.id],
         product_name: item.product_name,
@@ -121,18 +124,28 @@ router.post('/', async (req, res) => {
       });
       saleItems.push(saleItem);
       
-      // Reduce stock
+      // Aggregate quantities for same product
+      const productKey = item.product_name.toLowerCase().trim();
+      productTotals[productKey] = (productTotals[productKey] || 0) + Number(item.quantity);
+    }
+    
+    console.log('Product totals for stock reduction:', productTotals);
+    
+    // Reduce stock once per product with total quantity
+    for (const [productKey, totalQuantity] of Object.entries(productTotals)) {
       const stockItem = allStock.find(s => {
         const matchesBranch = s.branch_id && s.branch_id.includes(branchId);
-        const matchesProduct = (item.product_id && s.product_id === item.product_id) ||
-                             (s.product_name && s.product_name.toLowerCase().trim() === item.product_name.toLowerCase().trim());
+        const matchesProduct = s.product_name && s.product_name.toLowerCase().trim() === productKey;
         return matchesBranch && matchesProduct;
       });
       
-      if (stockItem && stockItem.quantity_available >= Number(item.quantity)) {
+      if (stockItem) {
+        console.log(`Reducing stock for ${productKey}: ${stockItem.quantity_available} - ${totalQuantity} = ${stockItem.quantity_available - totalQuantity}`);
         await airtableHelpers.update(TABLES.STOCK, stockItem.id, {
-          quantity_available: stockItem.quantity_available - Number(item.quantity)
+          quantity_available: Math.max(0, stockItem.quantity_available - totalQuantity)
         });
+      } else {
+        console.log(`No stock found for product: ${productKey}`);
       }
     }
     
