@@ -454,7 +454,7 @@ router.get('/analytics', async (req, res) => {
 const validateExpense = [
   body('expense_date').optional().isISO8601().withMessage('Valid expense date required'),
   body('branch_id').optional().notEmpty().withMessage('Branch ID required'),
-  body('category').optional().isIn(['fuel', 'maintenance', 'utilities', 'vehicle_related', 'other']).withMessage('Invalid category'),
+  body('category').optional().isIn(['fuel', 'maintenance', 'utilities', 'vehicle_related', 'rent', 'office_supplies', 'travel', 'marketing', 'insurance', 'other']).withMessage('Invalid category'),
   body('amount').optional().isFloat({ min: 0.01 }).withMessage('Amount must be positive'),
   body('description').optional().isLength({ max: 1000 }).withMessage('Description too long'),
   body('vehicle_id').optional().notEmpty(),
