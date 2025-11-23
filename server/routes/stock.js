@@ -169,7 +169,7 @@ router.post('/movement', async (req, res) => {
 });
 
 // Transfer endpoint (backward compatibility)
-router.post('/transfer', async (req, res) => {
+router.post('/transfer', authenticateToken, async (req, res) => {
   try {
     const { product_id, to_branch_id, from_branch_id, quantity, reason } = req.body;
     
