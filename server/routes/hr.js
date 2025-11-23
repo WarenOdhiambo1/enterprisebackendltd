@@ -164,24 +164,26 @@ router.get('/employees/:id', authenticateToken, authorizeRoles(['hr', 'admin', '
 // Create employee with complete profile
 router.post('/employees', async (req, res) => {
   try {
-    const { full_name, email, role, branch_id } = req.body;
+    const { full_name, email, role, branch_id, phone, salary } = req.body;
     
-    // Simple mock response to prevent 500 errors
-    const mockEmployee = {
-      id: `rec${Date.now()}`,
-      name: full_name || 'New Employee',
-      full_name: full_name || 'New Employee',
-      email: email || 'employee@company.com',
-      role: role || 'sales',
+    const employeeData = {
+      name: full_name,
+      full_name: full_name,
+      email: email,
+      phone: phone || '',
+      role: role,
       branch_id: branch_id ? [branch_id] : [],
+      salary: parseFloat(salary) || 0,
       is_active: true,
+      hire_date: new Date().toISOString().split('T')[0],
       created_at: new Date().toISOString()
     };
     
-    res.status(201).json(mockEmployee);
+    const newEmployee = await airtableHelpers.create(TABLES.EMPLOYEES, employeeData);
+    res.status(201).json(newEmployee);
   } catch (error) {
     console.error('Create employee error:', error);
-    res.status(500).json({ message: 'Failed to create employee' });
+    res.status(500).json({ message: 'Failed to create employee', error: error.message });
   }
 });
 
