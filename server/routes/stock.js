@@ -162,49 +162,6 @@ router.get('/movements/:branchId', async (req, res) => {
   }
 });
 
-// Stock Movement System - Comprehensive Architecture
-
-// Create movement (all types: new_stock, transfer_out, transfer_in, sale)
-router.post('/movement', async (req, res) => {
-  try {
-    const { 
-      movement_type, 
-      product_name, 
-      quantity, 
-      from_branch_id, 
-      to_branch_id, 
-      unit_cost, 
-      reason,
-      package_id,
-      adjustment_id 
-    } = req.body;
-    
-    const movementData = {
-      movement_type,
-      product_name,
-      quantity: parseInt(quantity),
-      unit_cost: parseFloat(unit_cost) || 0,
-      total_cost: parseInt(quantity) * (parseFloat(unit_cost) || 0),
-      reason: reason || '',
-      status: 'pending',
-      requested_by: req.user?.id ? [req.user.id] : [],
-      created_at: new Date().toISOString()
-    };
-    
-    // Add branch fields based on movement type
-    if (from_branch_id) movementData.from_branch_id = [from_branch_id];
-    if (to_branch_id) movementData.to_branch_id = [to_branch_id];
-    if (package_id) movementData.package_id = [package_id];
-    if (adjustment_id) movementData.adjustment_id = [adjustment_id];
-    
-    const movement = await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, movementData);
-    res.json({ success: true, movement });
-  } catch (error) {
-    console.error('Create movement error:', error);
-    res.status(500).json({ message: 'Failed to create movement', error: error.message });
-  }
-});
-
 // Transfer endpoint (backward compatibility)
 router.post('/transfer', authenticateToken, async (req, res) => {
   console.log('Transfer endpoint called with:', req.body);
@@ -237,120 +194,6 @@ router.post('/transfer', authenticateToken, async (req, res) => {
   }
 });
 
-// Approve movement
-router.put('/movement/:movementId/approve', async (req, res) => {
-  try {
-    const { movementId } = req.params;
-    
-    const movement = await airtableHelpers.findById(TABLES.STOCK_MOVEMENTS, movementId);
-    if (!movement) {
-      return res.status(404).json({ message: 'Movement not found' });
-    }
-    
-    // Update movement status
-    await airtableHelpers.update(TABLES.STOCK_MOVEMENTS, movementId, {
-      status: 'approved',
-      approved_by: req.user?.id ? [req.user.id] : [],
-      approved_at: new Date().toISOString()
-    });
-    
-    // Execute stock changes based on movement type
-    await executeStockMovement(movement);
-    
-    res.json({ success: true, message: 'Movement approved and executed' });
-  } catch (error) {
-    console.error('Approve movement error:', error);
-    res.status(500).json({ message: 'Failed to approve movement', error: error.message });
-  }
-});
-
-// Reject movement
-router.put('/movement/:movementId/reject', async (req, res) => {
-  try {
-    const { movementId } = req.params;
-    const { rejection_reason } = req.body;
-    
-    await airtableHelpers.update(TABLES.STOCK_MOVEMENTS, movementId, {
-      status: 'rejected',
-      approved_by: req.user?.id ? [req.user.id] : [],
-      approved_at: new Date().toISOString(),
-      rejection_reason: rejection_reason || 'No reason provided'
-    });
-    
-    res.json({ success: true, message: 'Movement rejected' });
-  } catch (error) {
-    console.error('Reject movement error:', error);
-    res.status(500).json({ message: 'Failed to reject movement', error: error.message });
-  }
-});
-
-// Helper function to execute stock changes
-async function executeStockMovement(movement) {
-  const { movement_type, product_name, quantity, from_branch_id, to_branch_id, unit_cost } = movement;
-  
-  switch (movement_type) {
-    case 'new_stock':
-      if (to_branch_id && to_branch_id[0]) {
-        await addStockToBranch(to_branch_id[0], product_name, quantity, unit_cost);
-      }
-      break;
-      
-    case 'transfer_out':
-      if (from_branch_id && from_branch_id[0]) {
-        await reduceStockFromBranch(from_branch_id[0], product_name, quantity);
-      }
-      if (to_branch_id && to_branch_id[0]) {
-        await addStockToBranch(to_branch_id[0], product_name, quantity, unit_cost);
-      }
-      break;
-      
-    case 'sale':
-      if (from_branch_id && from_branch_id[0]) {
-        await reduceStockFromBranch(from_branch_id[0], product_name, quantity);
-      }
-      break;
-  }
-}
-
-// Helper functions for stock operations
-async function addStockToBranch(branchId, productName, quantity, unitCost) {
-  const allStock = await airtableHelpers.find(TABLES.STOCK);
-  const existingStock = allStock.find(item => 
-    item.branch_id && item.branch_id.includes(branchId) && item.product_name === productName
-  );
-  
-  if (existingStock) {
-    await airtableHelpers.update(TABLES.STOCK, existingStock.id, {
-      quantity_available: existingStock.quantity_available + quantity,
-      last_updated: new Date().toISOString()
-    });
-  } else {
-    await airtableHelpers.create(TABLES.STOCK, {
-      branch_id: [branchId],
-      product_name: productName,
-      quantity_available: quantity,
-      unit_price: unitCost || 0,
-      reorder_level: 10,
-      last_updated: new Date().toISOString()
-    });
-  }
-}
-
-async function reduceStockFromBranch(branchId, productName, quantity) {
-  const allStock = await airtableHelpers.find(TABLES.STOCK);
-  const existingStock = allStock.find(item => 
-    item.branch_id && item.branch_id.includes(branchId) && item.product_name === productName
-  );
-  
-  if (existingStock) {
-    const newQuantity = Math.max(0, existingStock.quantity_available - quantity);
-    await airtableHelpers.update(TABLES.STOCK, existingStock.id, {
-      quantity_available: newQuantity,
-      last_updated: new Date().toISOString()
-    });
-  }
-}
-
 // Get pending transfers for a branch (both incoming and outgoing)
 router.get('/transfers/pending/:branchId', async (req, res) => {
   try {
@@ -359,21 +202,21 @@ router.get('/transfers/pending/:branchId', async (req, res) => {
     // Get all movements and filter in JavaScript (simpler approach)
     const allMovements = await airtableHelpers.find(TABLES.STOCK_MOVEMENTS);
     const branches = await airtableHelpers.find(TABLES.BRANCHES);
-    const users = await airtableHelpers.find(TABLES.USERS);
-    const products = await airtableHelpers.find(TABLES.PRODUCTS);
+    const users = await airtableHelpers.find(TABLES.EMPLOYEES);
+    const products = await airtableHelpers.find(TABLES.STOCK);
     
     const branchMap = branches.reduce((acc, branch) => {
-      acc[branch.Id] = branch.name;
+      acc[branch.id] = branch.branch_name || branch.name;
       return acc;
     }, {});
     
     const userMap = users.reduce((acc, user) => {
-      acc[user.Id] = user.name;
+      acc[user.id] = user.name;
       return acc;
     }, {});
     
     const productMap = products.reduce((acc, product) => {
-      acc[product.Id] = product.name;
+      acc[product.product_id] = product.product_name;
       return acc;
     }, {});
     
@@ -390,9 +233,9 @@ router.get('/transfers/pending/:branchId', async (req, res) => {
       ...transfer,
       direction: (transfer.to_branch_id && transfer.to_branch_id.includes(branchId)) ? 'incoming' : 'outgoing',
       canApprove: (transfer.to_branch_id && transfer.to_branch_id.includes(branchId)),
-      from_branch_name: branchMap[transfer.from_branch_id?.[0]] || 'Unknown',
-      to_branch_name: branchMap[transfer.to_branch_id?.[0]] || 'Unknown',
-      requested_by_name: userMap[transfer.requested_by?.[0]] || 'Unknown',
+      from_branch_name: branchMap[Array.isArray(transfer.from_branch_id) ? transfer.from_branch_id[0] : transfer.from_branch_id] || 'Unknown',
+      to_branch_name: branchMap[Array.isArray(transfer.to_branch_id) ? transfer.to_branch_id[0] : transfer.to_branch_id] || 'Unknown',
+      requested_by_name: userMap[Array.isArray(transfer.requested_by) ? transfer.requested_by[0] : transfer.requested_by] || 'Unknown',
       product_name: productMap[transfer.product_id] || transfer.product_id
     }));
     
@@ -410,21 +253,21 @@ router.get('/transfers/completed/:branchId', async (req, res) => {
     
     const allMovements = await airtableHelpers.find(TABLES.STOCK_MOVEMENTS);
     const branches = await airtableHelpers.find(TABLES.BRANCHES);
-    const users = await airtableHelpers.find(TABLES.USERS);
-    const products = await airtableHelpers.find(TABLES.PRODUCTS);
+    const users = await airtableHelpers.find(TABLES.EMPLOYEES);
+    const products = await airtableHelpers.find(TABLES.STOCK);
     
     const branchMap = branches.reduce((acc, branch) => {
-      acc[branch.Id] = branch.name;
+      acc[branch.id] = branch.branch_name || branch.name;
       return acc;
     }, {});
     
     const userMap = users.reduce((acc, user) => {
-      acc[user.Id] = user.name;
+      acc[user.id] = user.name;
       return acc;
     }, {});
     
     const productMap = products.reduce((acc, product) => {
-      acc[product.Id] = product.name;
+      acc[product.product_id] = product.product_name;
       return acc;
     }, {});
     
@@ -440,10 +283,10 @@ router.get('/transfers/completed/:branchId', async (req, res) => {
     const transfersWithDirection = relevantTransfers.map(transfer => ({
       ...transfer,
       direction: (transfer.to_branch_id && transfer.to_branch_id.includes(branchId)) ? 'incoming' : 'outgoing',
-      from_branch_name: branchMap[transfer.from_branch_id?.[0]] || 'Unknown',
-      to_branch_name: branchMap[transfer.to_branch_id?.[0]] || 'Unknown',
-      requested_by_name: userMap[transfer.requested_by?.[0]] || 'Unknown',
-      approved_by_name: userMap[transfer.approved_by?.[0]] || 'Unknown',
+      from_branch_name: branchMap[Array.isArray(transfer.from_branch_id) ? transfer.from_branch_id[0] : transfer.from_branch_id] || 'Unknown',
+      to_branch_name: branchMap[Array.isArray(transfer.to_branch_id) ? transfer.to_branch_id[0] : transfer.to_branch_id] || 'Unknown',
+      requested_by_name: userMap[Array.isArray(transfer.requested_by) ? transfer.requested_by[0] : transfer.requested_by] || 'Unknown',
+      approved_by_name: userMap[Array.isArray(transfer.approved_by) ? transfer.approved_by[0] : transfer.approved_by] || 'Unknown',
       product_name: productMap[transfer.product_id] || transfer.product_id
     }));
     
@@ -451,52 +294,6 @@ router.get('/transfers/completed/:branchId', async (req, res) => {
   } catch (error) {
     console.error('Get completed transfers error:', error);
     res.status(500).json({ message: 'Failed to fetch completed transfers' });
-  }
-});
-
-router.get('/transfers/pending/:branchId', async (req, res) => {
-  try {
-    const { branchId } = req.params;
-    
-    let filterFormula = '{status} = "pending"';
-    if (branchId !== 'all') {
-      filterFormula = `AND(${filterFormula}, {to_branch_id} = "${branchId}")`;
-    }
-    
-    const pendingTransfers = await airtableHelpers.find(TABLES.STOCK_MOVEMENTS, filterFormula);
-    
-    // Group by transfer_id
-    const groupedTransfers = pendingTransfers.reduce((acc, transfer) => {
-      const transferId = transfer.transfer_id;
-      if (!acc[transferId]) {
-        acc[transferId] = {
-          transferId,
-          fromBranchId: transfer.from_branch_id?.[0],
-          toBranchId: transfer.to_branch_id?.[0],
-          transferDate: transfer.transfer_date,
-          reason: transfer.reason,
-          requestedBy: transfer.requested_by,
-          status: transfer.status,
-          items: []
-        };
-      }
-      
-      acc[transferId].items.push({
-        movementId: transfer.id,
-        productId: transfer.product_id,
-        productName: transfer.product_name,
-        quantity: transfer.quantity,
-        unitCost: transfer.unit_cost,
-        totalCost: transfer.total_cost
-      });
-      
-      return acc;
-    }, {});
-    
-    res.json(Object.values(groupedTransfers));
-  } catch (error) {
-    console.error('Get pending transfers error:', error);
-    res.status(500).json({ message: 'Failed to fetch pending transfers' });
   }
 });
 
@@ -583,69 +380,15 @@ router.put('/transfers/:transferId/reject', async (req, res) => {
     const { transferId } = req.params;
     const { reason } = req.body;
     
-    // Update all movements for this transfer
-    const movements = await airtableHelpers.find(
-      TABLES.STOCK_MOVEMENTS,
-      `{transfer_id} = "${transferId}"`
-    );
-    
-    for (const movement of movements) {
-      await airtableHelpers.update(TABLES.STOCK_MOVEMENTS, movement.id, {
-        status: 'rejected',
-        rejected_by: [req.user.id],
-        rejected_at: new Date().toISOString(),
-        rejection_reason: reason || 'No reason provided'
-      });
-    }
-    
-    res.json({
-      success: true,
-      message: `Transfer ${transferId} rejected successfully`,
-      rejectedItems: movements.length
+    await airtableHelpers.update(TABLES.STOCK_MOVEMENTS, transferId, {
+      approved_by: ['REJECTED'],
+      approved_at: new Date().toISOString()
     });
+    
+    res.json({ success: true, message: 'Transfer rejected successfully' });
   } catch (error) {
     console.error('Reject transfer error:', error);
     res.status(500).json({ message: 'Failed to reject transfer' });
-  }
-});
-
-// Get transfer receipts
-router.get('/transfers/:transferId/receipt', async (req, res) => {
-  try {
-    const { transferId } = req.params;
-    
-    const movements = await airtableHelpers.find(
-      TABLES.STOCK_MOVEMENTS,
-      `{transfer_id} = "${transferId}"`
-    );
-    
-    if (movements.length === 0) {
-      return res.status(404).json({ message: 'Transfer not found' });
-    }
-    
-    const receipt = {
-      transferId,
-      status: movements[0].status,
-      transferDate: movements[0].transfer_date,
-      fromBranchId: movements[0].from_branch_id?.[0],
-      toBranchId: movements[0].to_branch_id?.[0],
-      reason: movements[0].reason,
-      requestedBy: movements[0].requested_by,
-      approvedBy: movements[0].approved_by,
-      approvedAt: movements[0].approved_at,
-      items: movements.map(m => ({
-        productName: m.product_name,
-        quantity: m.quantity,
-        unitCost: m.unit_cost,
-        totalCost: m.total_cost
-      })),
-      totalValue: movements.reduce((sum, m) => sum + (m.total_cost || 0), 0)
-    };
-    
-    res.json(receipt);
-  } catch (error) {
-    console.error('Get transfer receipt error:', error);
-    res.status(500).json({ message: 'Failed to get transfer receipt' });
   }
 });
 
