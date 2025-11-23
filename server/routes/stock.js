@@ -197,16 +197,15 @@ router.post('/transfer', authenticateToken, async (req, res) => {
   try {
     const { product_id, to_branch_id, from_branch_id, quantity, reason } = req.body;
     
-    // Use correct Stock_Movements fields
+    // Use correct Stock_Movements fields with valid select options
     const movementData = {
       from_branch_id: [from_branch_id],
       to_branch_id: [to_branch_id],
       product_id: product_id,
-      quantity: parseInt(quantity),
-      status: 'pending',
-      movement_type: 'transfer'
+      quantity: parseInt(quantity)
     };
     
+    // Only add optional fields if we know they exist
     if (req.user?.id) movementData.requested_by = [req.user.id];
     
     console.log('Creating movement with data:', movementData);
