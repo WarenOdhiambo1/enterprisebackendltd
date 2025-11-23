@@ -197,15 +197,17 @@ router.post('/transfer', authenticateToken, async (req, res) => {
   try {
     const { product_id, to_branch_id, from_branch_id, quantity, reason } = req.body;
     
-    // Use correct Stock_Movements fields with valid select options
+    // Use correct Stock_Movements fields
     const movementData = {
       from_branch_id: [from_branch_id],
       to_branch_id: [to_branch_id],
       product_id: product_id,
-      quantity: parseInt(quantity)
+      quantity: parseInt(quantity),
+      status: 'Pending',
+      movement_type: 'Transfer',
+      created_at: new Date().toISOString()
     };
     
-    // Only add optional fields if we know they exist
     if (req.user?.id) movementData.requested_by = [req.user.id];
     
     console.log('Creating movement with data:', movementData);
@@ -337,21 +339,21 @@ async function reduceStockFromBranch(branchId, productName, quantity) {
   }
 }
 
-// Get pending movements for approval
-router.get('/movements/pending/:branchId', async (req, res) => {
+// Get pending transfers for approval
+router.get('/transfers/pending/:branchId', async (req, res) => {
   try {
     const { branchId } = req.params;
     
-    let filterFormula = '{status} = "pending"';
+    let filterFormula = '{status} = "Pending"';
     if (branchId !== 'all') {
-      filterFormula = `AND(${filterFormula}, OR({from_branch_id} = "${branchId}", {to_branch_id} = "${branchId}"))`;
+      filterFormula = `AND(${filterFormula}, {to_branch_id} = "${branchId}")`;
     }
     
-    const pendingMovements = await airtableHelpers.find(TABLES.STOCK_MOVEMENTS, filterFormula);
-    res.json(pendingMovements);
+    const pendingTransfers = await airtableHelpers.find(TABLES.STOCK_MOVEMENTS, filterFormula);
+    res.json(pendingTransfers);
   } catch (error) {
-    console.error('Get pending movements error:', error);
-    res.status(500).json({ message: 'Failed to fetch pending movements' });
+    console.error('Get pending transfers error:', error);
+    res.status(500).json({ message: 'Failed to fetch pending transfers' });
   }
 });
 
@@ -401,17 +403,13 @@ router.get('/transfers/pending/:branchId', async (req, res) => {
   }
 });
 
-router.put('/transfers/:transferId/approve', async (req, res) => {
+router.put('/transfers/:transferId/approve', authenticateToken, async (req, res) => {
   try {
     const { transferId } = req.params;
     
-    // Get all movements for this transfer
-    const movements = await airtableHelpers.find(
-      TABLES.STOCK_MOVEMENTS,
-      `{transfer_id} = "${transferId}"`
-    );
-    
-    if (movements.length === 0) {
+    // Get the transfer record
+    const transfer = await airtableHelpers.findById(TABLES.STOCK_MOVEMENTS, transferId);
+    if (!transfer) {
       return res.status(404).json({ message: 'Transfer not found' });
     }
     
