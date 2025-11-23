@@ -67,7 +67,7 @@ router.get('/', authenticateToken, authorizeRoles(['admin', 'manager', 'boss']),
 });
 
 // Get all order items
-router.get('/items', async (req, res) => {
+router.get('/items', authenticateToken, async (req, res) => {
   try {
     const orderItems = await airtableHelpers.find(TABLES.ORDER_ITEMS);
     const orders = await airtableHelpers.find(TABLES.ORDERS);
@@ -105,7 +105,7 @@ router.get('/items', async (req, res) => {
 });
 
 // Get order tracking data
-router.get('/tracking', async (req, res) => {
+router.get('/tracking', authenticateToken, async (req, res) => {
   try {
     const orderItems = await airtableHelpers.find(TABLES.ORDER_ITEMS);
     const orders = await airtableHelpers.find(TABLES.ORDERS);
