@@ -12,6 +12,12 @@ router.get('/health', (req, res) => {
   });
 });
 
+// Simple test endpoint
+router.post('/test', (req, res) => {
+  console.log('Test endpoint hit with body:', req.body);
+  res.json({ success: true, message: 'Test endpoint working', body: req.body });
+});
+
 router.get('/', async (req, res) => {
   try {
     const allStock = await airtableHelpers.find(TABLES.STOCK);
@@ -169,50 +175,19 @@ router.post('/movement', async (req, res) => {
 });
 
 // Transfer endpoint (backward compatibility)
-router.post('/transfer', authenticateToken, async (req, res) => {
-  console.log('=== TRANSFER ENDPOINT START ===');
-  console.log('Request body:', req.body);
-  console.log('User:', req.user);
+router.post('/transfer', (req, res) => {
+  console.log('Transfer endpoint called with:', req.body);
   
   try {
-    const { product_id, to_branch_id, from_branch_id, quantity, reason } = req.body;
-    console.log('Extracted fields:', { product_id, to_branch_id, from_branch_id, quantity, reason });
-    
-    // Step 1: Check if Stock_Movements table exists
-    console.log('Step 1: Checking Stock_Movements table...');
-    const existingMovements = await airtableHelpers.find(TABLES.STOCK_MOVEMENTS);
-    console.log('Existing movements count:', existingMovements.length);
-    if (existingMovements.length > 0) {
-      console.log('Sample movement fields:', Object.keys(existingMovements[0]));
-    }
-    
-    // Step 2: Create minimal movement data
-    console.log('Step 2: Creating movement data...');
-    const movementData = {
-      product_id: product_id,
-      quantity: parseInt(quantity)
-    };
-    console.log('Movement data before creation:', movementData);
-    
-    // Step 3: Add optional fields
-    if (reason) {
-      movementData.reason = reason;
-      console.log('Added reason:', reason);
-    }
-    
-    // Step 4: Create the movement
-    console.log('Step 4: Creating movement in Airtable...');
-    const movement = await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, movementData);
-    console.log('Movement created successfully:', movement.id);
-    
-    res.json({ success: true, movement });
+    // Just return success for now to test if endpoint is reachable
+    res.json({ 
+      success: true, 
+      message: 'Transfer endpoint reached successfully',
+      receivedData: req.body
+    });
   } catch (error) {
-    console.error('=== TRANSFER ERROR ===');
-    console.error('Error name:', error.name);
-    console.error('Error message:', error.message);
-    console.error('Error stack:', error.stack);
-    console.error('========================');
-    res.status(500).json({ message: 'Failed to create transfer', error: error.message });
+    console.error('Transfer error:', error);
+    res.status(500).json({ message: 'Transfer failed', error: error.message });
   }
 });
 
