@@ -490,22 +490,61 @@ router.post('/:orderId/complete', authenticateToken, authorizeRoles(['admin', 'm
       return res.status(400).json({ message: 'Completed items are required' });
     }
 
-    // Process items quickly without heavy validation
-    const stockPromises = completedItems.map(async (item) => {
-      if (!item.branchDestinationId || !item.quantityOrdered) return;
+    // Aggregate quantities by product and branch
+    const productTotals = {};
+    
+    for (const item of completedItems) {
+      if (!item.branchDestinationId || !item.quantityOrdered) continue;
       
+      const key = `${item.branchDestinationId}_${item.productName.toLowerCase().trim()}`;
+      if (!productTotals[key]) {
+        productTotals[key] = {
+          branchId: item.branchDestinationId,
+          productName: item.productName,
+          totalQuantity: 0,
+          unitPrice: Number(item.purchasePrice) || 0
+        };
+      }
+      productTotals[key].totalQuantity += Number(item.quantityOrdered);
+    }
+    
+    console.log('Order product totals:', productTotals);
+    
+    // Get existing stock
+    const allStock = await airtableHelpers.find(TABLES.STOCK);
+    
+    // Process each unique product
+    const stockPromises = Object.values(productTotals).map(async (product) => {
       try {
-        await airtableHelpers.create(TABLES.STOCK, {
-          branch_id: [item.branchDestinationId],
-          product_id: `PRD_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-          product_name: item.productName,
-          quantity_available: Number(item.quantityOrdered),
-          unit_price: Number(item.purchasePrice) || 0,
-          reorder_level: 10,
-          last_updated: new Date().toISOString()
-        });
+        // Find existing stock
+        const existingStock = allStock.find(s => 
+          s.branch_id && s.branch_id.includes(product.branchId) && 
+          s.product_name && s.product_name.toLowerCase().trim() === product.productName.toLowerCase().trim()
+        );
+        
+        if (existingStock) {
+          // Update existing stock
+          console.log(`Updating stock for ${product.productName}: ${existingStock.quantity_available} + ${product.totalQuantity}`);
+          await airtableHelpers.update(TABLES.STOCK, existingStock.id, {
+            quantity_available: existingStock.quantity_available + product.totalQuantity,
+            unit_price: product.unitPrice,
+            last_updated: new Date().toISOString()
+          });
+        } else {
+          // Create new stock
+          console.log(`Creating new stock for ${product.productName}: ${product.totalQuantity}`);
+          await airtableHelpers.create(TABLES.STOCK, {
+            branch_id: [product.branchId],
+            product_id: `PRD_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+            product_name: product.productName,
+            quantity_available: product.totalQuantity,
+            unit_price: product.unitPrice,
+            reorder_level: 10,
+            last_updated: new Date().toISOString()
+          });
+        }
       } catch (err) {
-        console.log('Stock creation skipped for:', item.productName);
+        console.log('Stock operation failed for:', product.productName, err.message);
       }
     });
 
