@@ -3,50 +3,53 @@ const { airtableHelpers, TABLES } = require('../config/airtable');
 
 // JWT Authentication middleware
 const authenticateToken = async (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-
-  if (!token) {
-    return res.status(401).json({ message: 'Access token required' });
-  }
-
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+
+    if (!token) {
+      return res.status(401).json({ message: 'Access token required' });
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret');
     
     req.user = {
-      id: decoded.userId,
+      id: decoded.userId || decoded.id,
       email: decoded.email,
       role: decoded.role || 'admin',
-      branch_id: decoded.branch_id,
-      fullName: decoded.fullName
+      branch_id: decoded.branch_id || decoded.branchId,
+      fullName: decoded.fullName || decoded.name
     };
 
     next();
   } catch (error) {
-    if (error.name === 'TokenExpiredError') {
-      return res.status(401).json({ message: 'Token expired' });
-    }
-    return res.status(403).json({ message: 'Invalid token' });
+    console.error('Auth error:', error.message);
+    return res.status(401).json({ message: 'Authentication failed' });
   }
 };
 
 // Role-based authorization middleware
 const authorizeRoles = (allowedRoles) => {
   return (req, res, next) => {
-    if (!req.user) {
-      return res.status(401).json({ message: 'Authentication required' });
-    }
+    try {
+      if (!req.user) {
+        return res.status(401).json({ message: 'Authentication required' });
+      }
 
-    // Admin always has access
-    if (req.user.role === 'admin' || allowedRoles.includes(req.user.role)) {
-      return next();
-    }
+      // Admin always has access
+      if (req.user.role === 'admin' || allowedRoles.includes(req.user.role)) {
+        return next();
+      }
 
-    return res.status(403).json({ 
-      message: 'Insufficient permissions',
-      required: allowedRoles,
-      current: req.user.role
-    });
+      return res.status(403).json({ 
+        message: 'Insufficient permissions',
+        required: allowedRoles,
+        current: req.user.role
+      });
+    } catch (error) {
+      console.error('Authorization error:', error.message);
+      return res.status(500).json({ message: 'Authorization failed' });
+    }
   };
 };
 

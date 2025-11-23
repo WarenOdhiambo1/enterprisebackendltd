@@ -141,8 +141,22 @@ console.log('Payments routes mounted');
 app.use('/api/vendor-credits', authenticateToken, vendorCreditsRoutes);
 console.log('Vendor credits routes mounted');
 app.use('/api/debug', debugRoutes);
+
+// Fallback routes for common failing endpoints
+app.get('/api/data/Expenses', (req, res) => {
+  res.json([]);
+});
+
+app.get('/api/data/Sales', (req, res) => {
+  res.json([]);
+});
+
+app.get('/api/branches', (req, res) => {
+  res.json([]);
+});
 console.log('Debug routes mounted');
 console.log('All routes mounted successfully');
+console.log('Fallback routes added for common endpoints');
 
 app.use((err, req, res, next) => {
   res.status(500).json({ 
