@@ -8,6 +8,7 @@ const authenticateToken = async (req, res, next) => {
     const token = authHeader && authHeader.split(' ')[1];
 
     if (!token) {
+      console.error(`[AUTH ERROR] No token provided for ${req.method} ${req.path}`);
       return res.status(401).json({ message: 'Access token required' });
     }
 
@@ -21,10 +22,11 @@ const authenticateToken = async (req, res, next) => {
       fullName: decoded.fullName || decoded.name
     };
 
+    console.log(`[AUTH] User authenticated: ${req.user.role} - ${req.method} ${req.path}`);
     next();
   } catch (error) {
-    console.error('Auth error:', error.message);
-    return res.status(401).json({ message: 'Authentication failed' });
+    console.error(`[AUTH ERROR] ${error.name}: ${error.message} - ${req.method} ${req.path}`);
+    return res.status(401).json({ message: 'Authentication failed', error: error.message });
   }
 };
 
@@ -33,21 +35,24 @@ const authorizeRoles = (allowedRoles) => {
   return (req, res, next) => {
     try {
       if (!req.user) {
+        console.error(`[AUTHORIZATION ERROR] No user in request - ${req.method} ${req.path}`);
         return res.status(401).json({ message: 'Authentication required' });
       }
 
       // Admin always has access
       if (req.user.role === 'admin' || allowedRoles.includes(req.user.role)) {
+        console.log(`[AUTHORIZATION] Access granted: ${req.user.role} to ${req.path}`);
         return next();
       }
 
+      console.error(`[AUTHORIZATION ERROR] Forbidden: User ${req.user.role} attempted ${req.path}, required: ${allowedRoles.join(', ')}`);
       return res.status(403).json({ 
         message: 'Insufficient permissions',
         required: allowedRoles,
         current: req.user.role
       });
     } catch (error) {
-      console.error('Authorization error:', error.message);
+      console.error(`[AUTHORIZATION ERROR] ${error.message} - ${req.method} ${req.path}`);
       return res.status(500).json({ message: 'Authorization failed' });
     }
   };
@@ -59,16 +64,19 @@ const authorizeBranch = (req, res, next) => {
   
   // Boss, Manager, and Admin can access all branches
   if (['boss', 'manager', 'admin'].includes(req.user.role)) {
+    console.log(`[BRANCH AUTH] ${req.user.role} granted access to all branches`);
     return next();
   }
 
   // HR can access all branches for employee management
   if (req.user.role === 'hr') {
+    console.log(`[BRANCH AUTH] HR granted access to all branches`);
     return next();
   }
 
   // Other roles can only access their assigned branch
   if (req.user.branchId && requestedBranchId && req.user.branchId !== requestedBranchId) {
+    console.error(`[BRANCH AUTH ERROR] User branch ${req.user.branchId} attempted access to branch ${requestedBranchId}`);
     return res.status(403).json({ 
       message: 'Access denied to this branch',
       userBranch: req.user.branchId,
@@ -76,6 +84,7 @@ const authorizeBranch = (req, res, next) => {
     });
   }
 
+  console.log(`[BRANCH AUTH] Access granted to branch ${requestedBranchId}`);
   next();
 };
 

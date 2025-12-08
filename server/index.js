@@ -60,6 +60,12 @@ app.use(cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// Request logger
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+  next();
+});
+
 app.get('/', (req, res) => {
   res.json({ 
     status: 'OK', 
@@ -101,77 +107,73 @@ app.get('/api/stock/test', (req, res) => {
 
 
 
-console.log('Mounting routes...');
+console.log('[BACKEND] Mounting routes...');
 app.use('/api/auth', authRoutes);
-console.log('Auth routes mounted');
+console.log('[BACKEND] ✓ Auth routes mounted at /api/auth');
 app.use('/api/branches', branchRoutes);
-console.log('Branches routes mounted');
+console.log('[BACKEND] ✓ Branches routes mounted at /api/branches');
 app.use('/api/expenses', authenticateToken, expensesRoutes);
-console.log('Expenses routes mounted');
+console.log('[BACKEND] ✓ Expenses routes mounted at /api/expenses');
 app.use('/api/stock', authenticateToken, stockRoutes);
-console.log('Stock routes mounted');
+console.log('[BACKEND] ✓ Stock routes mounted at /api/stock');
 app.use('/api/sales', authenticateToken, salesRoutes);
-console.log('Sales routes mounted');
+console.log('[BACKEND] ✓ Sales routes mounted at /api/sales');
 app.use('/api/logistics', authenticateToken, logisticsRoutes);
-console.log('Logistics routes mounted');
+console.log('[BACKEND] ✓ Logistics routes mounted at /api/logistics');
 app.use('/api/orders', authenticateToken, ordersRoutes);
-console.log('Orders routes mounted');
+console.log('[BACKEND] ✓ Orders routes mounted at /api/orders');
 app.use('/api/hr', authenticateToken, hrRoutes);
-console.log('HR routes mounted');
+console.log('[BACKEND] ✓ HR routes mounted at /api/hr');
 app.use('/api/boss', authenticateToken, authorizeRoles(['boss', 'manager', 'admin']), bossRoutes);
-console.log('Boss routes mounted');
+console.log('[BACKEND] ✓ Boss routes mounted at /api/boss');
 app.use('/api/manager', authenticateToken, managerRoutes);
-console.log('Manager routes mounted');
+console.log('[BACKEND] ✓ Manager routes mounted at /api/manager');
 app.use('/api/admin', authenticateToken, adminRoutes);
-console.log('Admin routes mounted');
+console.log('[BACKEND] ✓ Admin routes mounted at /api/admin');
 app.use('/api/data', authenticateToken, dataRoutes);
-console.log('Data routes mounted');
+console.log('[BACKEND] ✓ Data routes mounted at /api/data');
 app.use('/api/purchase-receives', authenticateToken, purchaseReceivesRoutes);
-console.log('Purchase receives routes mounted');
+console.log('[BACKEND] ✓ Purchase receives routes mounted at /api/purchase-receives');
 app.use('/api/bills', authenticateToken, billsRoutes);
-console.log('Bills routes mounted');
+console.log('[BACKEND] ✓ Bills routes mounted at /api/bills');
 app.use('/api/inventory-adjustments', authenticateToken, inventoryAdjustmentsRoutes);
-console.log('Inventory adjustments routes mounted');
+console.log('[BACKEND] ✓ Inventory adjustments routes mounted at /api/inventory-adjustments');
 app.use('/api/logistics-transactions', authenticateToken, logisticsTransactionsRoutes);
-console.log('Logistics transactions routes mounted');
+console.log('[BACKEND] ✓ Logistics transactions routes mounted at /api/logistics-transactions');
 app.use('/api/packages', authenticateToken, packagesRoutes);
-console.log('Packages routes mounted');
+console.log('[BACKEND] ✓ Packages routes mounted at /api/packages');
 app.use('/api/payments', authenticateToken, paymentsRoutes);
-console.log('Payments routes mounted');
+console.log('[BACKEND] ✓ Payments routes mounted at /api/payments');
 app.use('/api/vendor-credits', authenticateToken, vendorCreditsRoutes);
-console.log('Vendor credits routes mounted');
+console.log('[BACKEND] ✓ Vendor credits routes mounted at /api/vendor-credits');
 app.use('/api/debug', debugRoutes);
+console.log('[BACKEND] ✓ Debug routes mounted at /api/debug');
 
-// Fallback routes for common failing endpoints
-app.get('/api/data/Expenses', (req, res) => {
-  res.json([]);
-});
+console.log('[BACKEND] ✓ All routes mounted successfully');
 
-app.get('/api/data/Sales', (req, res) => {
-  res.json([]);
-});
-
-app.get('/api/branches', (req, res) => {
-  res.json([]);
-});
-console.log('Debug routes mounted');
-console.log('All routes mounted successfully');
-console.log('Fallback routes added for common endpoints');
-
-app.use((err, req, res, next) => {
-  res.status(500).json({ 
-    message: 'Something went wrong!',
-    ...(process.env.NODE_ENV === 'development' && { error: err.message })
+// 404 handler (must be after all routes)
+app.use('*', (req, res) => {
+  console.error(`[BACKEND ERROR] 404 - Route not found: ${req.method} ${req.originalUrl}`);
+  res.status(404).json({ 
+    error: 'Route not found',
+    method: req.method,
+    path: req.originalUrl,
+    timestamp: new Date().toISOString(),
+    availableRoutes: ['/api/auth', '/api/branches', '/api/stock', '/api/sales', '/api/logistics', '/api/orders', '/api/hr', '/api/boss', '/api/manager', '/api/admin', '/api/expenses', '/api/data']
   });
 });
 
-app.use('*', (req, res) => {
-  console.log('404 - Route not found:', req.method, req.originalUrl);
-  res.status(404).json({ 
-    message: 'Route not found',
-    method: req.method,
-    url: req.originalUrl,
-    timestamp: new Date().toISOString()
+// Error handler (must have 4 parameters and be last)
+app.use((err, req, res, next) => {
+  console.error(`[BACKEND ERROR] ${err.name}: ${err.message}`);
+  console.error(`[BACKEND ERROR] Path: ${req.method} ${req.path}`);
+  console.error(`[BACKEND ERROR] Stack:`, err.stack);
+  
+  res.status(err.status || 500).json({ 
+    error: err.message || 'Internal server error',
+    path: req.path,
+    timestamp: new Date().toISOString(),
+    ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
   });
 });
 
