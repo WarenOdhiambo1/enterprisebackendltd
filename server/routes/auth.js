@@ -184,6 +184,44 @@ router.post('/register', validateAndSanitize([
       return res.status(400).json({ message: 'Only admin, manager, or boss registration is allowed' });
     }
 
+    // Check if admin already exists when trying to register admin
+    if (userRole === 'admin') {
+      const Airtable = require('airtable');
+      Airtable.configure({
+        apiKey: process.env.AIRTABLE_API_KEY,
+        requestTimeout: 60000
+      });
+      const base = Airtable.base(process.env.AIRTABLE_BASE_ID);
+      
+      const existingAdmins = await base('Employees').select({
+        filterByFormula: `{role} = 'admin'`,
+        maxRecords: 1
+      }).firstPage();
+      
+      if (existingAdmins.length > 0) {
+        return res.status(400).json({ 
+          message: 'Admin already exists. Only one admin account is allowed. Please contact existing admin.' 
+        });
+      }
+    }
+
+    // Check if email already exists
+    const Airtable = require('airtable');
+    Airtable.configure({
+      apiKey: process.env.AIRTABLE_API_KEY,
+      requestTimeout: 60000
+    });
+    const base = Airtable.base(process.env.AIRTABLE_BASE_ID);
+    
+    const existingUsers = await base('Employees').select({
+      filterByFormula: `{email} = '${email.toLowerCase().trim()}'`,
+      maxRecords: 1
+    }).firstPage();
+    
+    if (existingUsers.length > 0) {
+      return res.status(400).json({ message: 'Email already registered' });
+    }
+
     const hashedPassword = await bcrypt.hash(password, 12);
     
     const userData = {
@@ -199,14 +237,7 @@ router.post('/register', validateAndSanitize([
     
     console.log('Creating user with data:', { ...userData, password_hash: '[HIDDEN]' });
     
-    const Airtable = require('airtable');
-    Airtable.configure({
-      endpointUrl: 'https://api.airtable.com',
-      apiKey: process.env.AIRTABLE_API_KEY
-    });
-    const base = Airtable.base(process.env.AIRTABLE_BASE_ID);
-    
-    const createdRecords = await base('Employees').create([{ fields: userData }]);
+    const createdRecords = await base('Employees').create([{ fields: userData }], { typecast: true });
     const createdUser = createdRecords[0];
     
     console.log('User created successfully:', createdUser.id);
@@ -222,11 +253,12 @@ router.post('/register', validateAndSanitize([
     });
   } catch (error) {
     console.error('Register error:', error.message);
-    console.error('Register error stack:', error.stack);
+    if (error.message.includes('Admin already exists')) {
+      return res.status(400).json({ message: error.message });
+    }
     res.status(500).json({ 
       message: 'Registration failed', 
-      error: error.message,
-      details: error.stack
+      error: error.message
     });
   }
 });
