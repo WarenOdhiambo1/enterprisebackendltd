@@ -7,43 +7,33 @@ const router = express.Router();
 // Get all branches (public for home page)
 router.get('/public', async (req, res) => {
   try {
-    console.log('=== BRANCHES PUBLIC ROUTE ===');
-    console.log('Environment check:', {
-      hasApiKey: !!process.env.AIRTABLE_API_KEY,
-      hasBaseId: !!process.env.AIRTABLE_BASE_ID,
-      apiKeyLength: process.env.AIRTABLE_API_KEY ? process.env.AIRTABLE_API_KEY.length : 0,
-      baseIdLength: process.env.AIRTABLE_BASE_ID ? process.env.AIRTABLE_BASE_ID.length : 0
+    const Airtable = require('airtable');
+    Airtable.configure({
+      apiKey: process.env.AIRTABLE_API_KEY,
+      requestTimeout: 60000
     });
+    const base = Airtable.base(process.env.AIRTABLE_BASE_ID);
     
-    if (!process.env.AIRTABLE_API_KEY || !process.env.AIRTABLE_BASE_ID) {
-      console.error('Missing Airtable configuration');
-      return res.status(200).json([]); // Return empty array instead of error
-    }
-
-    console.log('Attempting to fetch branches...');
-    const branches = await airtableHelpers.find(TABLES.BRANCHES);
-    console.log('Found branches:', branches.length);
+    const records = await Promise.race([
+      base('Branches').select({ maxRecords: 10 }).firstPage(),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Query timeout')), 50000)
+      )
+    ]);
     
-    const publicBranches = branches.map(branch => ({
-      id: branch.id,
-      name: branch.branch_name || 'Branch',
-      address: branch.location_address || 'Address not available',
-      latitude: branch.latitude,
-      longitude: branch.longitude,
-      phone: branch.phone,
-      email: branch.email
+    const publicBranches = records.map(record => ({
+      id: record.id,
+      name: record.fields.branch_name || 'Branch',
+      address: record.fields.location_address || 'Address not available',
+      latitude: record.fields.latitude,
+      longitude: record.fields.longitude,
+      phone: record.fields.phone,
+      email: record.fields.email
     }));
 
-    console.log('Returning public branches:', publicBranches.length);
     res.json(publicBranches);
   } catch (error) {
-    console.error('=== BRANCHES ERROR ===');
-    console.error('Error message:', error.message);
-    console.error('Error stack:', error.stack);
-    console.error('Error name:', error.name);
-    console.error('=== END BRANCHES ERROR ===');
-    
-    // Return empty array instead of error to prevent frontend crashes
+    console.error('Branches error:', error.message);
     res.status(200).json([]);
   }
 });

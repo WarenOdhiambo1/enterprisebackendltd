@@ -271,21 +271,28 @@ router.post('/login', validateAndSanitize([
       const Airtable = require('airtable');
       Airtable.configure({
         endpointUrl: 'https://api.airtable.com',
-        apiKey: process.env.AIRTABLE_API_KEY
+        apiKey: process.env.AIRTABLE_API_KEY,
+        requestTimeout: 60000
       });
       const base = Airtable.base(process.env.AIRTABLE_BASE_ID);
       
-      records = await base('Employees').select({
-        filterByFormula: `{email} = '${email}'`
-      }).all();
+      records = await Promise.race([
+        base('Employees').select({
+          filterByFormula: `{email} = '${email}'`,
+          maxRecords: 1
+        }).firstPage(),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Query timeout')), 50000)
+        )
+      ]);
     } catch (airtableError) {
       console.error('Airtable connection failed:', airtableError.message);
-      return res.status(500).json({ message: 'Database connection failed' });
+      return res.status(500).json({ message: 'Database connection failed', error: airtableError.message });
     }
     
-    console.log('Found', records.length, 'matching users in database');
+    console.log('Found', records?.length || 0, 'matching users in database');
     
-    if (records.length > 0) {
+    if (records && records.length > 0) {
       user = {
         id: records[0].id,
         ...records[0].fields
